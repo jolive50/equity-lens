@@ -1,15 +1,252 @@
-# AI-Capstone-Personal-Testing-Environment
+# StockSense - AI-Powered Stock Analysis Platform
 
-Explainable AI Stock Market Prediction with Sentiment Integration
+StockSense is a production-ready web application that provides layperson-friendly stock insights using AI-powered forecasting, sentiment analysis, and smart money tracking. The system integrates LangChain and LangGraph for orchestrated multi-agent workflows.
 
+## 🚀 Features
 
-## Repository Structure (Data-Focused Workstreams)
+### Core Capabilities
+- **Probabilistic Forecasting**: AI-powered directional predictions with 95% confidence horizons
+- **Sentiment Analysis**: Real-time news and social media sentiment using FinBERT
+- **Smart Money Tracking**: Institutional flows, insider trading, and congressional disclosures
+- **Layperson Explanations**: Plain English analysis with tier-based detail levels
+- **Multi-Source Data**: Swappable adapters for Alpha Vantage, Tiingo, Finnhub, and NewsAPI
 
-- `docs/data/` – Detailed playbooks for batch sourcing, streaming pipelines, and web scraping operations.
-- `data/batch/` – Landing and processed zones for historical datasets used in model training and evaluation.
-- `data/realtime/` – Low-latency storage zones backing online inference and continual learning features.
-- `pipelines/` – Code scaffolding for batch ETL jobs and streaming consumers orchestrating ingestion flows.
-- `webscraping/` – Configurations and parser modules for compliant, source-specific crawlers.
+### User Tiers
+- **Basic**: Core forecasting and sentiment analysis
+- **Premium**: Advanced features including smart money insights, alerts, and historical analysis
+
+## 🏗️ Architecture
+
+### System Components
+- **Frontend**: Next.js/React with TypeScript and Radix UI
+- **Backend**: FastAPI with LangGraph workflow orchestration
+- **AI Agents**: Specialized agents for prediction, sentiment, explanation, and smart money
+- **Data Layer**: Swappable adapters following OOP principles
+- **ML Pipeline**: Probabilistic forecasting with confidence calibration
+
+### Data Flow
+```
+User Input → API Gateway → LangGraph Workflow → AI Agents → Response Assembly → Frontend
+```
+
+## 📋 Prerequisites
+
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL (for production)
+- API Keys for data sources
+
+## 🛠️ Installation
+
+### 1. Clone Repository
+```bash
+git clone <repository-url>
+cd capstone
+```
+
+### 2. Backend Setup
+```bash
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+cp .env.example .env
+# Edit .env with your API keys
+```
+
+### 3. Frontend Setup
+```bash
+cd frontend
+npm install
+```
+
+### 4. Environment Configuration
+Create a `.env` file in the root directory:
+```bash
+# API Keys
+ALPHA_VANTAGE_API_KEY=TKL8YS43GMNA1BYD
+TIINGO_API_KEY=01163c25587928b9b80c53f37d946a76460a1f2f
+FINNHUB_API_KEY=d3a2f59r01qli8jccd0gd3a2f59r01qli8jccd10
+NEWSAPI_KEY=6fb3385bef034fcea2afabf02a2365fe
+
+# LangChain
+OPENAI_API_KEY=your_openai_key
+LANGCHAIN_API_KEY=your_langchain_key
+
+# Database (for production)
+DATABASE_URL=postgresql://user:pass@localhost/stocksense
+```
+
+## 🚀 Running the Application
+
+### Development Mode
+
+#### Backend (FastAPI)
+```bash
+# From root directory
+python -m pipelines.realtime.api
+# Or with uvicorn directly
+uvicorn pipelines.realtime.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### Frontend (Next.js)
+```bash
+cd frontend
+npm run dev
+```
+
+### Production Mode
+```bash
+# Backend
+uvicorn pipelines.realtime.api:app --host 0.0.0.0 --port 8000
+
+# Frontend
+cd frontend
+npm run build
+npm start
+```
+
+## 📊 API Endpoints
+
+### Core Analysis
+- `POST /analyze` - Main stock analysis endpoint
+- `GET /prices` - Historical price data
+- `GET /news` - News articles and sentiment
+- `GET /sentiment` - Sentiment analysis results
+- `GET /smart-money` - Institutional and insider data
+
+### Health and Info
+- `GET /` - API information
+- `GET /health` - Health check
+- `GET /docs` - Interactive API documentation
+
+## 🧪 Testing
+
+### Backend Tests
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_agents.py
+
+# Run with coverage
+pytest --cov=pipelines
+```
+
+### Frontend Tests
+```bash
+cd frontend
+npm test
+```
+
+## 📈 Usage Examples
+
+### Basic Stock Analysis
+```bash
+curl -X POST "http://localhost:8000/analyze" \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "user_tier": "basic"}'
+```
+
+### Premium Analysis
+```bash
+curl -X POST "http://localhost:8000/analyze" \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "user_tier": "premium"}'
+```
+
+## 🔧 Configuration
+
+### Data Adapters
+The system uses swappable data adapters following the Strategy pattern:
+
+```python
+from pipelines.realtime.data_adapters import DataAdapterFactory
+
+# Create adapter
+adapter = DataAdapterFactory.create_adapter("alpha_vantage", api_key)
+
+# Use in service
+from pipelines.realtime.data_adapters import DataService
+service = DataService({"alpha_vantage": adapter})
+```
+
+### LangGraph Workflow
+Customize the workflow by modifying agent prompts:
+
+```python
+from pipelines.realtime.agents import PredictionAgent
+from pipelines.realtime.langgraph_workflow import create_stocksense_workflow
+
+# Create custom workflow
+workflow = create_stocksense_workflow(
+    prediction_agent=prediction_agent,
+    sentiment_agent=sentiment_agent,
+    explanation_agent=explanation_agent,
+    smart_money_agent=smart_money_agent,
+    confidence_threshold=0.95
+)
+```
+
+## 📚 Documentation
+
+- [System Architecture](docs/architecture.md)
+- [API Documentation](http://localhost:8000/docs)
+- [Data Sources](docs/data/)
+- [Deployment Guide](docs/deployment.md)
+
+## 🚨 Important Disclaimers
+
+- **Informational Only**: StockSense provides educational information, not investment advice
+- **No Guarantees**: Past performance does not guarantee future results
+- **Risk Warning**: All investments carry risk of loss
+- **Data Accuracy**: While we strive for accuracy, data may contain errors
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+For support and questions:
+- Create an issue in the repository
+- Check the [documentation](docs/)
+- Review the [API documentation](http://localhost:8000/docs)
+
+## 🔮 Roadmap
+
+### Phase 1 (Current)
+- ✅ Core forecasting and sentiment analysis
+- ✅ Basic and premium user tiers
+- ✅ Multi-source data integration
+
+### Phase 2 (Next)
+- 🔄 Advanced ML models and backtesting
+- 🔄 Real-time streaming data
+- 🔄 Portfolio analysis features
+
+### Phase 3 (Future)
+- 📋 Options data integration
+- 📋 Alternative data sources
+- 📋 Mobile application
+- 📋 Advanced risk metrics
+
+---
+
+**StockSense** - Making stock analysis accessible to everyone through AI-powered insights.
 
 
 

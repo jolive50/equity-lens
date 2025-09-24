@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "@radix-ui/themes/styles.css";
+import { Theme } from "@radix-ui/themes";
+import Link from "next/link";
+import { BarChart3, Newspaper, Sparkles } from "lucide-react";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,10 +28,28 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <Theme appearance="dark" accentColor="indigo" radius="large">
+          <header className="border-b border-zinc-800 bg-black/60 backdrop-blur supports-[backdrop-filter]:bg-black/40">
+            <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
+              <Link href="/" className="flex items-center gap-2 font-semibold">
+                <Sparkles className="h-5 w-5 text-indigo-400" />
+                <span>Explainable Markets</span>
+              </Link>
+              <nav className="ml-auto flex items-center gap-6 text-sm text-zinc-300">
+                <Link href="/dashboard" className="hover:text-white flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" /> Dashboard
+                </Link>
+                <Link href="/news" className="hover:text-white flex items-center gap-2">
+                  <Newspaper className="h-4 w-4" /> News
+                </Link>
+              </nav>
+            </div>
+          </header>
+          <main className="mx-auto max-w-7xl px-4 py-6">
+            {children}
+          </main>
+        </Theme>
       </body>
     </html>
   );

@@ -8,9 +8,6 @@ from typing import Iterable, Optional
 
 from langchain_core.runnables import RunnableLambda, RunnableParallel
 
-from .news.yahoo_finance import YahooNewsConfig, poll_yahoo_news
-from .news.newsapi import NewsAPIConfig, poll_newsapi_headlines
-
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +19,8 @@ class CollectNewsRequest:
 
 
 def _yahoo_node(req: CollectNewsRequest) -> str:
+    # Lazy import to avoid importing yfinance unless needed
+    from .news.yahoo_finance import YahooNewsConfig, poll_yahoo_news
     cfg = YahooNewsConfig(tickers=req.tickers)
     poll_yahoo_news(cfg)
     return "yahoo_ok"
@@ -30,6 +29,7 @@ def _yahoo_node(req: CollectNewsRequest) -> str:
 def _newsapi_node(req: CollectNewsRequest) -> str:
     if not req.newsapi_key:
         return "newsapi_skipped"
+    from .news.newsapi import NewsAPIConfig, poll_newsapi_headlines
     cfg = NewsAPIConfig(api_key=req.newsapi_key, tickers=req.tickers)
     poll_newsapi_headlines(cfg)
     return "newsapi_ok"
