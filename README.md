@@ -74,8 +74,8 @@ FINNHUB_API_KEY=d3a2f59r01qli8jccd0gd3a2f59r01qli8jccd10
 NEWSAPI_KEY=6fb3385bef034fcea2afabf02a2365fe
 
 # LangChain
-OPENAI_API_KEY=your_openai_key
-LANGCHAIN_API_KEY=your_langchain_key
+OPENAI_API_KEY=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
+LANGCHAIN_API_KEY=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
 
 # Database (for production)
 DATABASE_URL=postgresql://user:pass@localhost/stocksense

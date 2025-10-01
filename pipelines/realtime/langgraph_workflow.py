@@ -5,9 +5,10 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Literal, Optional, TypedDict
 
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import StateGraph
 
 from .agents import ExplanationAgent, PredictionAgent, SentimentAgent, SmartMoneyAgent
+from .data_adapters import DataService
 
 
 class StockAnalysisState(TypedDict, total=False):
@@ -33,6 +34,7 @@ def create_stocksense_workflow(
     sentiment_agent: SentimentAgent,
     explanation_agent: ExplanationAgent,
     smart_money_agent: SmartMoneyAgent,
+    data_service: Optional[DataService] = None,
     confidence_threshold: float = 0.95,
 ) -> StateGraph:
     """Compose the LangGraph workflow for StockSense analysis."""
@@ -51,34 +53,90 @@ def create_stocksense_workflow(
 
     def collect_market_data(state: StockAnalysisState) -> StockAnalysisState:
         """Collect market data and fundamentals."""
-        # This would integrate with data adapters
-        # For now, using mock data structure
-        state["market_data"] = {
-            "price": 150.0,
-            "volume": 1000000,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        state["fundamentals"] = {
-            "revenue_growth": 0.08,
-            "ebitda_margin": 0.28,
-            "debt_to_ebitda": 2.1,
-            "pe_ratio": 25.5,
-            "fcf_yield": 0.04
-        }
+        if data_service:
+            # Try to get real market data
+            market_data = data_service.get_market_data(state["ticker"], "alpha_vantage")
+            fundamentals = data_service.get_fundamentals(state["ticker"], "alpha_vantage")
+            
+            if market_data:
+                state["market_data"] = {
+                    "price": market_data.price,
+                    "volume": market_data.volume,
+                    "timestamp": market_data.timestamp,
+                    "source": market_data.source
+                }
+            else:
+                # Fallback to mock data
+                state["market_data"] = {
+                    "price": 150.0,
+                    "volume": 1000000,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "source": "mock"
+                }
+            
+            if fundamentals:
+                state["fundamentals"] = {
+                    "revenue_growth": fundamentals.revenue_growth or 0.08,
+                    "ebitda_margin": fundamentals.ebitda_margin or 0.28,
+                    "debt_to_ebitda": fundamentals.debt_to_ebitda or 2.1,
+                    "pe_ratio": fundamentals.pe_ratio or 25.5,
+                    "fcf_yield": fundamentals.fcf_yield or 0.04
+                }
+            else:
+                # Fallback to mock fundamentals
+                state["fundamentals"] = {
+                    "revenue_growth": 0.08,
+                    "ebitda_margin": 0.28,
+                    "debt_to_ebitda": 2.1,
+                    "pe_ratio": 25.5,
+                    "fcf_yield": 0.04
+                }
+        else:
+            # Use mock data if no data service provided
+            state["market_data"] = {
+                "price": 150.0,
+                "volume": 1000000,
+                "timestamp": datetime.utcnow().isoformat(),
+                "source": "mock"
+            }
+            state["fundamentals"] = {
+                "revenue_growth": 0.08,
+                "ebitda_margin": 0.28,
+                "debt_to_ebitda": 2.1,
+                "pe_ratio": 25.5,
+                "fcf_yield": 0.04
+            }
         return state
 
     def collect_news_data(state: StockAnalysisState) -> StockAnalysisState:
         """Collect news and sentiment data."""
-        # This would integrate with news adapters
-        state["news_data"] = [
-            {
-                "title": "Strong earnings report",
-                "content": "Company reports better than expected Q4 results",
-                "sentiment_score": 0.8,
-                "source": "Financial Times",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        ]
+        if data_service:
+            # Get news from all available sources
+            news_items = data_service.get_all_news(state["ticker"])
+            
+            # Convert to format expected by sentiment agent
+            state["news_data"] = []
+            for item in news_items[:50]:  # Limit to 50 most recent articles
+                state["news_data"].append({
+                    "title": item.title,
+                    "content": item.content,
+                    "sentiment_score": item.sentiment_score,
+                    "source": item.source,
+                    "url": item.url,
+                    "timestamp": item.timestamp
+                })
+        else:
+            # Fallback to mock news data
+            state["news_data"] = [
+                {
+                    "title": "Strong earnings report",
+                    "content": "Company reports better than expected Q4 results",
+                    "sentiment_score": 0.8,
+                    "source": "Financial Times",
+                    "url": "https://example.com/news1",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            ]
         return state
 
     def run_prediction(state: StockAnalysisState) -> StockAnalysisState:
@@ -170,7 +228,7 @@ def create_stocksense_workflow(
     builder.add_node("explain", build_explanation)
 
     # Define workflow edges
-    builder.add_edge(START, "validate")
+    builder.set_entry_point("validate")
     builder.add_edge("validate", "market_data")
     builder.add_edge("validate", "news_data")
     builder.add_edge("market_data", "predict")
@@ -178,7 +236,7 @@ def create_stocksense_workflow(
     builder.add_edge("predict", "smart_money")
     builder.add_edge("sentiment", "smart_money")
     builder.add_edge("smart_money", "explain")
-    builder.add_edge("explain", END)
+    builder.set_finish_point("explain")
 
     return builder
 
@@ -219,6 +277,7 @@ def run_stocksense_analysis(
     sentiment_agent: SentimentAgent,
     explanation_agent: ExplanationAgent,
     smart_money_agent: SmartMoneyAgent,
+    data_service: Optional[DataService] = None,
     confidence_threshold: float = 0.95,
 ) -> Dict[str, any]:
     """Convenience helper that executes the StockSense workflow end-to-end."""
@@ -228,6 +287,7 @@ def run_stocksense_analysis(
         sentiment_agent=sentiment_agent,
         explanation_agent=explanation_agent,
         smart_money_agent=smart_money_agent,
+        data_service=data_service,
         confidence_threshold=confidence_threshold,
     ).compile()
 

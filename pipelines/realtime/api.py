@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Optional
+import os
+from typing import Dict, Optional, List, Iterable
 
-from fastapi import FastAPI, HTTPException, Query
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
 from .data_adapters import DataAdapterFactory, DataService
 from .langgraph_workflow import run_stocksense_analysis
@@ -16,8 +19,13 @@ from .agents import (
     PredictionAgent,
     SentimentAgent,
     SmartMoneyAgent,
+    build_openai_llm,
     build_mock_llm,
 )
+from .repository import JsonFileRepository, WatchlistRepository, HistoryRepository, AlertsRepository, AlertRule
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,9 +65,33 @@ class AnalysisResponse(BaseModel):
     disclaimers: list
 
 
+class BatchAnalysisRequest(BaseModel):
+    tickers: List[str]
+    user_tier: str = "premium"
+
+
+class BatchAnalysisItem(BaseModel):
+    ticker: str
+    as_of: str
+    direction: str
+    confidence: float
+    horizon_days: int
+    score: float
+    sentiment: Dict
+
+
+class BatchAnalysisResponse(BaseModel):
+    user_tier: str
+    count: int
+    items: List[BatchAnalysisItem]
+
+
 # Global service instances (in production, these would be dependency injected)
 _data_service: Optional[DataService] = None
 _agents: Optional[Dict[str, any]] = None
+_watchlists: Optional[WatchlistRepository] = None
+_history: Optional[HistoryRepository] = None
+_alerts: Optional[AlertsRepository] = None
 
 
 def get_data_service() -> DataService:
@@ -99,9 +131,13 @@ def get_agents() -> Dict[str, any]:
     """Get or create the agent instances."""
     global _agents
     if _agents is None:
-        # In production, this would use a real LLM like OpenAI GPT-4
-        # For now, using mock LLM for demonstration
-        llm = build_mock_llm("stocksense")
+        # Try to use OpenAI LLM, fallback to mock if API key not available
+        try:
+            llm = build_openai_llm("gpt-4o-mini")
+            logger.info("Using OpenAI GPT-4o-mini for agents")
+        except ValueError as e:
+            logger.warning(f"OpenAI not available: {e}. Using mock LLM.")
+            llm = build_mock_llm("stocksense")
         
         _agents = {
             "prediction": PredictionAgent(llm),
@@ -113,6 +149,19 @@ def get_agents() -> Dict[str, any]:
     return _agents
 
 
+def get_repos() -> Dict[str, any]:
+    global _watchlists, _history, _alerts
+    if _watchlists is None or _history is None or _alerts is None:
+        base_dir = os.getenv("APP_DATA_DIR", os.path.join(os.getcwd(), "..", "data", "realtime", "feature_store"))
+        wl_store = JsonFileRepository(os.path.join(base_dir, "_app", "watchlists.json"))
+        hist_store = JsonFileRepository(os.path.join(base_dir, "_app", "history.json"))
+        al_store = JsonFileRepository(os.path.join(base_dir, "_app", "alerts.json"))
+        _watchlists = WatchlistRepository(wl_store)
+        _history = HistoryRepository(hist_store)
+        _alerts = AlertsRepository(al_store)
+    return {"watchlists": _watchlists, "history": _history, "alerts": _alerts}
+
+
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
@@ -122,6 +171,7 @@ async def root():
         "description": "Layperson-friendly stock insights with AI-powered forecasting",
         "endpoints": {
             "/analyze": "Main analysis endpoint",
+            "/analyze/batch": "Premium-only batch analysis endpoint",
             "/health": "Health check",
             "/docs": "API documentation"
         }
@@ -175,8 +225,23 @@ async def analyze_stock(request: AnalysisRequest):
             sentiment_agent=agents["sentiment"],
             explanation_agent=agents["explanation"],
             smart_money_agent=agents["smart_money"],
+            data_service=data_service,
         )
         
+        # Append compact history entry for the anonymous demo user
+        repos = get_repos()
+        history: HistoryRepository = repos["history"]
+        history.append(
+            user_id="demo", 
+            entry={
+                "ticker": result["ticker"],
+                "as_of": result["as_of"],
+                "direction": result["forecast"]["direction"],
+                "confidence": float(result["forecast"]["confidence"]),
+                "score": float(result.get("sentiment", {}).get("score", 0.0)),
+            }
+        )
+
         return AnalysisResponse(**result)
         
     except HTTPException:
@@ -323,10 +388,16 @@ async def get_sentiment(
 
 @app.get("/smart-money")
 async def get_smart_money(
-    ticker: str = Query(..., description="Stock ticker symbol")
+    ticker: str = Query(..., description="Stock ticker symbol"),
+    user_tier: str = Query("basic", description="User tier for gating features"),
 ):
     """Get smart money data for a ticker."""
     try:
+        if user_tier != "premium":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Smart money data is available to premium users only",
+            )
         agents = get_agents()
         
         # Run smart money analysis
@@ -345,6 +416,222 @@ async def get_smart_money(
             status_code=500,
             detail="Failed to analyze smart money data"
         )
+
+
+@app.post("/analyze/batch", response_model=BatchAnalysisResponse)
+async def analyze_batch(request: BatchAnalysisRequest):
+    """Batch analysis for multiple tickers. Premium-only.
+
+    For each ticker, returns compact prediction summary suitable for watchlists.
+    """
+    # Role guard
+    if request.user_tier != "premium":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Batch analysis is available to premium users only",
+        )
+
+    # Basic validation
+    tickers = [t.strip().upper() for t in request.tickers if t and isinstance(t, str)]
+    if not tickers:
+        raise HTTPException(status_code=400, detail="No tickers provided")
+
+    # De-duplicate while preserving order
+    seen: set = set()
+    deduped: List[str] = []
+    for t in tickers:
+        if t not in seen and len(t) <= 10:
+            seen.add(t)
+            deduped.append(t)
+
+    data_service = get_data_service()
+    agents = get_agents()
+
+    items: List[BatchAnalysisItem] = []
+    for t in deduped:
+        try:
+            result = run_stocksense_analysis(
+                ticker=t,
+                user_tier=request.user_tier,
+                prediction_agent=agents["prediction"],
+                sentiment_agent=agents["sentiment"],
+                explanation_agent=agents["explanation"],
+                smart_money_agent=agents["smart_money"],
+                data_service=data_service,
+            )
+
+            horizon_days = int(result["forecast"]["horizon_95"].get("days", 0)) if result["forecast"].get("horizon_95") else 0
+            items.append(
+                BatchAnalysisItem(
+                    ticker=result["ticker"],
+                    as_of=result["as_of"],
+                    direction=result["forecast"]["direction"],
+                    confidence=float(result["forecast"]["confidence"]),
+                    horizon_days=horizon_days,
+                    score=float(result["sentiment"].get("score", 0.0)),
+                    sentiment=result["sentiment"],
+                )
+            )
+        except Exception as e:
+            logger.error(f"Batch analyze failed for {t}: {e}")
+            # Skip failed ticker rather than failing whole batch
+            continue
+
+    return BatchAnalysisResponse(user_tier=request.user_tier, count=len(items), items=items)
+
+
+def _iter_predictions_csv(rows: Iterable[Dict[str, any]]) -> Iterable[str]:
+    # Header
+    yield "ticker,date,up,down,neutral,direction,confidence,horizon_days\n"
+    for r in rows:
+        line = f"{r['ticker']},{r['date']},{r['up']:.4f},{r['down']:.4f},{r['neutral']:.4f},{r['direction']},{r['confidence']:.4f},{r['horizon_days']}\n"
+        yield line
+
+
+@app.get("/export/predictions.csv")
+async def export_predictions_csv(
+    tickers: str = Query(..., description="Comma-separated list of tickers"),
+    max_rows: int = Query(5000, le=5000, ge=1, description="Maximum rows to export (cap 5000)"),
+    user_tier: str = Query("premium", description="User tier for gating features"),
+):
+    """Stream CSV of prediction daily probabilities for one or more tickers.
+
+    Guarantees at most 5,000 rows to meet performance SLO.
+    """
+    if user_tier != "premium":
+        raise HTTPException(status_code=403, detail="CSV export is available to premium users only")
+
+    symbols = [s.strip().upper() for s in tickers.split(",") if s.strip()]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="No tickers provided")
+
+    data_service = get_data_service()
+    agents = get_agents()
+
+    aggregated: List[Dict[str, any]] = []
+    for sym in symbols:
+        try:
+            res = run_stocksense_analysis(
+                ticker=sym,
+                user_tier=user_tier,
+                prediction_agent=agents["prediction"],
+                sentiment_agent=agents["sentiment"],
+                explanation_agent=agents["explanation"],
+                smart_money_agent=agents["smart_money"],
+                data_service=data_service,
+            )
+            horizon_days = int(res["forecast"]["horizon_95"].get("days", 0)) if res["forecast"].get("horizon_95") else 0
+            direction = res["forecast"]["direction"]
+            confidence = float(res["forecast"]["confidence"])  # overall
+            for day in res["forecast"].get("daily_probs", [])[:max_rows]:
+                aggregated.append(
+                    {
+                        "ticker": res["ticker"],
+                        "date": day["date"],
+                        "up": float(day.get("up", 0.0)),
+                        "down": float(day.get("down", 0.0)),
+                        "neutral": float(day.get("neutral", 0.0)),
+                        "direction": direction,
+                        "confidence": confidence,
+                        "horizon_days": horizon_days,
+                    }
+                )
+                if len(aggregated) >= max_rows:
+                    break
+            if len(aggregated) >= max_rows:
+                break
+        except Exception as e:
+            logger.error(f"CSV export analysis failed for {sym}: {e}")
+            continue
+
+    generator = _iter_predictions_csv(aggregated)
+    headers = {
+        "Content-Disposition": "attachment; filename=predictions.csv"
+    }
+    return StreamingResponse(generator, media_type="text/csv", headers=headers)
+
+
+# Watchlists API (file-backed)
+@app.get("/watchlist")
+async def get_watchlist(user_id: str = Query("demo")):
+    repos = get_repos()
+    watchlists: WatchlistRepository = repos["watchlists"]
+    return {"user_id": user_id, "tickers": watchlists.get(user_id)}
+
+
+@app.post("/watchlist")
+async def add_to_watchlist(user_id: str = Query("demo"), ticker: str = Query(...)):
+    repos = get_repos()
+    watchlists: WatchlistRepository = repos["watchlists"]
+    updated = watchlists.add(user_id, ticker)
+    return {"user_id": user_id, "tickers": updated}
+
+
+@app.delete("/watchlist")
+async def remove_from_watchlist(user_id: str = Query("demo"), ticker: str = Query(...)):
+    repos = get_repos()
+    watchlists: WatchlistRepository = repos["watchlists"]
+    updated = watchlists.remove(user_id, ticker)
+    return {"user_id": user_id, "tickers": updated}
+
+
+# History API
+@app.get("/history")
+async def get_history(user_id: str = Query("demo"), limit: int = Query(100, le=1000)):
+    repos = get_repos()
+    history: HistoryRepository = repos["history"]
+    items = history.list(user_id, limit)
+    return {"user_id": user_id, "count": len(items), "items": items}
+
+
+# Alerts API (store only; evaluation hooks are left to scheduler/webhook)
+@app.get("/alerts")
+async def list_alerts(user_id: str = Query("demo")):
+    repos = get_repos()
+    alerts: AlertsRepository = repos["alerts"]
+    return {"user_id": user_id, "rules": alerts.list(user_id)}
+
+
+@app.post("/alerts")
+async def upsert_alert(user_id: str = Query("demo"), ticker: str = Query(...), condition: str = Query(...), threshold: float = Query(...)):
+    if condition not in ("prob_down_gte", "prob_up_gte", "confidence_gte"):
+        raise HTTPException(status_code=400, detail="Unsupported condition")
+    if not (0.0 <= threshold <= 1.0):
+        raise HTTPException(status_code=400, detail="threshold must be within [0,1]")
+    repos = get_repos()
+    alerts: AlertsRepository = repos["alerts"]
+    updated = alerts.upsert(user_id, AlertRule(ticker=ticker.upper(), condition=condition, threshold=threshold))
+    return {"user_id": user_id, "rules": updated}
+
+
+@app.delete("/alerts")
+async def delete_alert(user_id: str = Query("demo"), ticker: str = Query(...), condition: Optional[str] = Query(None)):
+    repos = get_repos()
+    alerts: AlertsRepository = repos["alerts"]
+    updated = alerts.delete(user_id, ticker.upper(), condition)
+    return {"user_id": user_id, "rules": updated}
+
+
+# Admin API (minimal)
+@app.get("/admin/usage")
+async def admin_usage():
+    # Aggregate basic usage from history store
+    repos = get_repos()
+    history: HistoryRepository = repos["history"]
+    all_items = history.list("demo", limit=1000)
+    by_ticker: Dict[str, int] = {}
+    for it in all_items:
+        t = it.get("ticker", "?")
+        by_ticker[t] = by_ticker.get(t, 0) + 1
+    top = sorted(by_ticker.items(), key=lambda kv: kv[1], reverse=True)[:20]
+    return {"active_users": 1, "recent_predictions": len(all_items), "top_tickers": top}
+
+
+@app.post("/admin/models/deploy")
+async def admin_models_deploy(model_name: str = Query(...)):
+    # Stub deployment hook – in a real system, trigger CI/CD or model registry update
+    logger.info(f"Admin requested model deployment: {model_name}")
+    return {"status": "ok", "message": f"Deployment initiated for {model_name}"}
 
 
 if __name__ == "__main__":
