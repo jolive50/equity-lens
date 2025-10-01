@@ -361,10 +361,16 @@ def build_openai_llm(model: str = "gpt-4o-mini") -> Runnable:
 def build_mock_llm(tag: str) -> Runnable:
     """Utility to build a lightweight mock LLM for offline demos."""
 
-    def _mock(prompt: str) -> str:
-        return f"[{tag}] Mock response for: {prompt[:200]}..."
+    def _mock(prompt) -> str:
+        if hasattr(prompt, 'messages'):
+            content = prompt.messages[0].content
+        elif isinstance(prompt, str):
+            content = prompt
+        else:
+            content = str(prompt)
+        return f"[{tag}] Mock response for: {content[:200]}..."
 
-    return RunnableLambda(lambda prompt: _mock(prompt["messages"][0]["content"]))
+    return RunnableLambda(_mock)
 
 
 # Helper functions for parsing agent outputs
