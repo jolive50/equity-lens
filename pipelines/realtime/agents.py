@@ -5,6 +5,7 @@ LangGraph orchestration layer can focus on routing state between them.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional
@@ -12,6 +13,8 @@ from typing import Dict, List, Literal, Optional
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableLambda
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,7 +53,20 @@ class PredictionAgent:
         llm: Runnable,
         *,
         prompt: Optional[ChatPromptTemplate] = None,
+        use_ml_model: bool = True,
     ) -> None:
+        self.use_ml_model = use_ml_model
+        if use_ml_model:
+            try:
+                from .models.forecaster import create_forecaster
+                self.forecaster = create_forecaster("gradient_boosting")
+            except ImportError:
+                logger.warning("ML forecaster not available, falling back to LLM-based prediction")
+                self.forecaster = None
+                self.use_ml_model = False
+        else:
+            self.forecaster = None
+        
         base_prompt = prompt or ChatPromptTemplate.from_template(
             """You are an expert equity prediction specialist focused on probabilistic forecasting.
 
@@ -75,6 +91,23 @@ Be conservative with confidence - only assign high confidence (>0.9) when multip
         self._chain = base_prompt | llm | StrOutputParser()
 
     def run(self, *, ticker: str, market_data: Dict, fundamentals: Dict[str, float]) -> PredictionResult:
+        # Try ML model first if available
+        if self.use_ml_model and self.forecaster and isinstance(market_data, list):
+            try:
+                ml_result = self.forecaster.predict(market_data, fundamentals)
+                
+                # Convert ML result to PredictionResult format
+                return PredictionResult(
+                    direction=ml_result.direction,
+                    confidence=ml_result.confidence,
+                    narrative=f"ML model prediction based on technical indicators and market patterns. "
+                             f"Confidence: {ml_result.confidence:.1%}. "
+                             f"95% horizon: {ml_result.horizon_95.get('days', 0)} days."
+                )
+            except Exception as e:
+                logger.warning(f"ML prediction failed: {e}, falling back to LLM")
+        
+        # Fallback to LLM-based analysis
         raw_output = self._chain.invoke({
             "ticker": ticker,
             "market_data": str(market_data),
@@ -100,7 +133,20 @@ class SentimentAgent:
         llm: Runnable,
         *,
         prompt: Optional[ChatPromptTemplate] = None,
+        use_finbert: bool = True,
     ) -> None:
+        self.use_finbert = use_finbert
+        if use_finbert:
+            try:
+                from .sentiment.finbert import create_sentiment_analyzer
+                self.sentiment_analyzer = create_sentiment_analyzer()
+            except ImportError:
+                logger.warning("FinBERT not available, falling back to LLM-based sentiment")
+                self.sentiment_analyzer = None
+                self.use_finbert = False
+        else:
+            self.sentiment_analyzer = None
+        
         base_prompt = prompt or ChatPromptTemplate.from_template(
             """You are a financial sentiment analyst specializing in news and social media analysis.
 
@@ -126,6 +172,22 @@ Be objective and focus on factual sentiment rather than speculation."""
         self._chain = base_prompt | llm | StrOutputParser()
 
     def run(self, *, ticker: str, news_data: List[Dict]) -> SentimentResult:
+        # Try FinBERT first if available
+        if self.use_finbert and self.sentiment_analyzer and news_data:
+            try:
+                finbert_result = self.sentiment_analyzer.process_news_articles(news_data)
+                
+                # Convert FinBERT result to SentimentResult format
+                return SentimentResult(
+                    current=finbert_result["current"],
+                    score=finbert_result["score"],
+                    trend=finbert_result["trend"],
+                    headlines=finbert_result["headlines"]
+                )
+            except Exception as e:
+                logger.warning(f"FinBERT analysis failed: {e}, falling back to LLM")
+        
+        # Fallback to LLM-based analysis
         raw_output = self._chain.invoke({
             "ticker": ticker,
             "news_data": str(news_data)
@@ -152,7 +214,27 @@ class SmartMoneyAgent:
         llm: Runnable,
         *,
         prompt: Optional[ChatPromptTemplate] = None,
+        use_data_service: bool = True,
     ) -> None:
+        self.use_data_service = use_data_service
+        if use_data_service:
+            try:
+                from .smart_money import create_smart_money_service
+                import os
+                api_keys = {
+                    "alpha_vantage": os.getenv("ALPHA_VANTAGE_API_KEY"),
+                    "finnhub": os.getenv("FINNHUB_API_KEY")
+                }
+                # Filter out None values
+                api_keys = {k: v for k, v in api_keys.items() if v}
+                self.smart_money_service = create_smart_money_service(api_keys)
+            except ImportError:
+                logger.warning("Smart money service not available, falling back to LLM-based analysis")
+                self.smart_money_service = None
+                self.use_data_service = False
+        else:
+            self.smart_money_service = None
+        
         base_prompt = prompt or ChatPromptTemplate.from_template(
             """You are a smart money analyst tracking institutional flows, insider trading, and congressional disclosures.
 
@@ -175,6 +257,22 @@ If no recent data is available, indicate "No recent activity" for that category.
         self._chain = base_prompt | llm | StrOutputParser()
 
     def run(self, *, ticker: str) -> SmartMoneyResult:
+        # Try smart money service first if available
+        if self.use_data_service and self.smart_money_service:
+            try:
+                institutional = self.smart_money_service.get_institutional_summary(ticker)
+                insider = self.smart_money_service.get_insider_summary(ticker)
+                congressional = self.smart_money_service.get_congressional_summary(ticker)
+                
+                return SmartMoneyResult(
+                    institutions=institutional,
+                    insiders=insider,
+                    congress=congressional
+                )
+            except Exception as e:
+                logger.warning(f"Smart money service failed: {e}, falling back to LLM")
+        
+        # Fallback to LLM-based analysis
         raw_output = self._chain.invoke({"ticker": ticker})
         
         institutions = _extract_smart_money_section(raw_output, "INSTITUTIONS")
@@ -241,6 +339,23 @@ Keep explanations concise but comprehensive - aim for 3-4 paragraphs."""
             "user_tier": user_tier,
             "confidence_level": confidence_level
         }).strip()
+
+
+def build_openai_llm(model: str = "gpt-4o-mini") -> Runnable:
+    """Build OpenAI LLM using LangChain."""
+    from langchain_openai import ChatOpenAI
+    import os
+    
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is required")
+    
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        temperature=0.1,  # Low temperature for consistent financial analysis
+        max_tokens=1000
+    )
 
 
 def build_mock_llm(tag: str) -> Runnable:
