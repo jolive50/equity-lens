@@ -171,7 +171,7 @@ async def root():
         "description": "Layperson-friendly stock insights with AI-powered forecasting",
         "endpoints": {
             "/analyze": "Main analysis endpoint",
-            "/analyze/batch": "Premium-only batch analysis endpoint",
+            "/analyze/batch": "Batch analysis endpoint (registered/premium)",
             "/health": "Health check",
             "/docs": "API documentation"
         }
@@ -207,10 +207,10 @@ async def analyze_stock(request: AnalysisRequest):
                 detail="Invalid ticker symbol"
             )
         
-        if request.user_tier not in ["basic", "premium"]:
+        if request.user_tier not in ["basic", "registered", "premium"]:
             raise HTTPException(
                 status_code=400,
-                detail="User tier must be 'basic' or 'premium'"
+                detail="User tier must be 'basic', 'registered' or 'premium'"
             )
         
         # Get services
@@ -420,15 +420,15 @@ async def get_smart_money(
 
 @app.post("/analyze/batch", response_model=BatchAnalysisResponse)
 async def analyze_batch(request: BatchAnalysisRequest):
-    """Batch analysis for multiple tickers. Premium-only.
+    """Batch analysis for multiple tickers. Registered and Premium only.
 
     For each ticker, returns compact prediction summary suitable for watchlists.
     """
     # Role guard
-    if request.user_tier != "premium":
+    if request.user_tier not in ["registered", "premium"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Batch analysis is available to premium users only",
+            detail="Batch analysis is available to registered and premium users",
         )
 
     # Basic validation
@@ -594,7 +594,7 @@ async def list_alerts(user_id: str = Query("demo")):
 
 @app.post("/alerts")
 async def upsert_alert(user_id: str = Query("demo"), ticker: str = Query(...), condition: str = Query(...), threshold: float = Query(...)):
-    if condition not in ("prob_down_gte", "prob_up_gte", "confidence_gte"):
+    if condition not in {"prob_down_gte", "prob_up_gte", "confidence_gte"}:
         raise HTTPException(status_code=400, detail="Unsupported condition")
     if not (0.0 <= threshold <= 1.0):
         raise HTTPException(status_code=400, detail="threshold must be within [0,1]")
@@ -608,7 +608,7 @@ async def upsert_alert(user_id: str = Query("demo"), ticker: str = Query(...), c
 async def delete_alert(user_id: str = Query("demo"), ticker: str = Query(...), condition: Optional[str] = Query(None)):
     repos = get_repos()
     alerts: AlertsRepository = repos["alerts"]
-    updated = alerts.delete(user_id, ticker.upper(), condition)
+    updated = alerts.delete(user_id, ticker, condition)
     return {"user_id": user_id, "rules": updated}
 
 
