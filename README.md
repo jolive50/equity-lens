@@ -65,21 +65,21 @@ npm install
 ```
 
 ### 4. Environment Configuration
-Create a `.env` file in the root directory:
+**IMPORTANT:** The `.env` file has already been created with your API keys. Never commit this file to git!
+
+If you need to create a new `.env` file:
 ```bash
-# API Keys
-ALPHA_VANTAGE_API_KEY=TKL8YS43GMNA1BYD
-TIINGO_API_KEY=01163c25587928b9b80c53f37d946a76460a1f2f
-FINNHUB_API_KEY=d3a2f59r01qli8jccd0gd3a2f59r01qli8jccd10
-NEWSAPI_KEY=6fb3385bef034fcea2afabf02a2365fe
-
-# LangChain
-OPENAI_API_KEY=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
-LANGCHAIN_API_KEY=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
-
-# Database (for production)
-DATABASE_URL=postgresql://user:pass@localhost/stocksense
+cp .env.example .env
+# Then edit .env and add your actual API keys
 ```
+
+**Get your free API keys from:**
+- Alpha Vantage: https://www.alphavantage.co/support/#api-key (500 calls/day)
+- Tiingo: https://www.tiingo.com/ (500 calls/day)
+- Finnhub: https://finnhub.io/register (60 calls/minute)
+- NewsAPI: https://newsapi.org/register (100 requests/day)
+- OpenAI: https://platform.openai.com/api-keys (required for AI agents)
+- LangChain: https://smith.langchain.com/ (optional, for monitoring)
 
 ## 🚀 Running the Application
 

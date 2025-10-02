@@ -9,20 +9,12 @@ import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-try:
-    from .data_sources import (
-        YahooFinanceProvider, 
-        APIRateLimiter, 
-        DataValidationService,
-        FinancialDataProvider
-    )
-except ImportError:
-    from data_sources import (
-        YahooFinanceProvider, 
-        APIRateLimiter, 
-        DataValidationService,
-        FinancialDataProvider
-    )
+from .data_sources import (
+    YahooFinanceProvider, 
+    APIRateLimiter, 
+    DataValidationService,
+    FinancialDataProvider
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +46,8 @@ class TickerListProvider:
         return validated
 
 
-class DataProcessingValidator:
-    """Validates and processes financial data quality."""
+class FinancialDataValidator:
+    """Validates financial data quality (Single Responsibility Principle)."""
     
     @staticmethod
     def process_ticker_data(ticker: str, historical_data: List[Dict], 
@@ -81,10 +73,6 @@ class DataProcessingValidator:
         }
 
 
-class FinancialDataValidator:
-    """Validates financial analysis (Single Responsibility Principle)."""
-
-
 class SP500DataService:
     """Main service for S&P 500 data retrieval (Open/Closed Principle).
     
@@ -106,7 +94,7 @@ class SP500DataService:
         self.data_provider = data_provider or YahooFinanceProvider(
             rate_limiter=APIRateLimiter(requests_per_minute=12)
         )
-        self.validator = validator or DataProcessingValidator()
+        self.validator = validator or FinancialDataValidator()
         self.ticker_provider = ticker_provider or TickerListProvider()
         
         logger.info("SP500DataService initialized with dependencies")
@@ -336,7 +324,7 @@ def get_sp500_data_service() -> SP500DataService:
             data_provider=YahooFinanceProvider(
                 rate_limiter=APIRateLimiter(requests_per_minute=12)
             ),
-            validator=DataProcessingValidator(),
+            validator=FinancialDataValidator(),
             ticker_provider=TickerListProvider()
         )
         logger.info("Created global SP500DataService instance")
@@ -355,20 +343,20 @@ if __name__ == "__main__":
         # Test single ticker
         print("Testing single ticker data retrieval...")
         aapl_data = service.get_single_ticker_data("AAPL")
-        print(f"Single ticker test passed: {len(aapl_data['market_data'])} data points")
+        print(f"✅ Single ticker test passed: {len(aapl_data['market_data'])} data points")
         
         # Test multiple tickers
         print("Testing multiple tickers data retrieval...")
         sample_data = service.get_sp500_sample(count=3)
-        print(f"Multiple tickers test passed: {len(sample_data)} companies")
+        print(f"✅ Multiple tickers test passed: {len(sample_data)} companies")
         
         # Test sector analysis
         print("Testing sector analysis...")
         sector_analysis = service.get_sector_analysis(["AAPL", "MSFT", "GOOGL"])
-        print(f"Sector analysis test passed: {sector_analysis['overall_trend']} trend")
+        print(f"✅ Sector analysis test passed: {sector_analysis['overall_trend']} trend")
         
-        print("\nAll tests passed! Refactored service is working correctly.")
+        print("\n🎉 All tests passed! Refactored service is working correctly.")
         
     except Exception as e:
-        print(f"Test failed: {e}")
+        print(f"❌ Test failed: {e}")
         logger.error(f"Service test failed: {e}", exc_info=True)
