@@ -2,79 +2,195 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Literal, Optional, TypedDict
+from typing import Dict, List, Literal, Optional, TypedDict, Any
 
 from langgraph.graph import StateGraph
 
-from .agents import ExplanationAgent, PredictionAgent, SentimentAgent, SmartMoneyAgent
+from .agents import (
+    CoordinationAgent, HistoricalAnalysisAgent, SentimentAnalysisAgent, 
+    ExplanationAgent, PredictionAgent, SentimentAgent, SmartMoneyAgent
+)
 from .data_adapters import DataService
+from .sp500_data_service import get_sp500_data_service
+
+logger = logging.getLogger(__name__)
 
 
 class StockAnalysisState(TypedDict, total=False):
     """State object for the StockSense analysis workflow."""
     ticker: str
+    tickers: List[str]  # Support multiple S&P 500 companies
     user_tier: Literal["basic", "premium"]
     market_data: Optional[Dict]
+    comprehensive_market_data: Dict[str, Dict]  # Data for multiple tickers
     news_data: List[Dict]
+    comprehensive_news_data: Dict[str, List[Dict]]  # News for multiple tickers
     fundamentals: Dict[str, float]
+    comprehensive_fundamentals: Dict[str, Dict[str, float]]  # Fundamentals for multiple tickers
     prediction_result: Optional[Dict]
+    comprehensive_predictions: Dict[str, Dict]  # Predictions for multiple tickers
     sentiment_result: Optional[Dict]
+    comprehensive_sentiment: Dict[str, Dict]  # Sentiment for multiple tickers
     smart_money_data: Optional[Dict]
     explanation: Optional[str]
+    comprehensive_explanation: Optional[str]  # Combined explanation for all tickers
     confidence_level: Literal["high", "medium", "low"]
+    confidence_score: float  # Raw confidence score (0.0-1.0)
     daily_probs: List[Dict]
     horizon_95: Optional[Dict]
     warnings: List[str]
+    working_agent_results: Dict[str, Any]  # Results from working agents
+    coordination_summary: Optional[str]  # Summary from coordinating agent
 
 
 def create_stocksense_workflow(
     *,
+    coordination_agent: CoordinationAgent,
+    historical_agent: HistoricalAnalysisAgent,
+    sentiment_agent: SentimentAnalysisAgent,
     prediction_agent: PredictionAgent,
-    sentiment_agent: SentimentAgent,
     explanation_agent: ExplanationAgent,
     smart_money_agent: SmartMoneyAgent,
     data_service: Optional[DataService] = None,
     confidence_threshold: float = 0.95,
 ) -> StateGraph:
-    """Compose the LangGraph workflow for StockSense analysis."""
+    """Compose the enhanced LangGraph workflow for StockSense analysis with coordinating agent."""
 
     builder = StateGraph(StockAnalysisState)
 
     def validate_input(state: StockAnalysisState) -> StockAnalysisState:
-        """Validate input ticker and set defaults."""
+        """Validate input ticker or tickers and set defaults."""
+        if not state.get("ticker") and not state.get("tickers"):
+            raise ValueError("Either ticker or tickers list is required")
+        
         if not state.get("ticker"):
-            raise ValueError("ticker is required")
+            # If no single ticker, use first ticker for backward compatibility
+            if state.get("tickers"):
+                state["ticker"] = state["tickers"][0]
+            else:
+                raise ValueError("No ticker information provided")
+        
         if not state.get("user_tier"):
             state["user_tier"] = "basic"
         if not state.get("warnings"):
             state["warnings"] = []
+        
+        # Default to single ticker analysis if no tickers list
+        if state.get("ticker") and not state.get("tickers"):
+            state["tickers"] = [state["ticker"]]
+        
         return state
 
-    def collect_market_data(state: StockAnalysisState) -> StockAnalysisState:
-        """Collect market data and fundamentals."""
-        # Use mock data for now to avoid API issues
-        state["market_data"] = [
-            {"date": "2025-01-24", "close": 150.0, "volume": 1000000},
-            {"date": "2025-01-23", "close": 148.0, "volume": 950000}
-        ]
-        state["fundamentals"] = {
-            "revenue_growth": 0.08,
-            "ebitda_margin": 0.28,
-            "debt_to_ebitda": 2.1
+    def collect_sp500_data(state: StockAnalysisState) -> StockAnalysisState:
+        """Collect historical data and fundamentals for S&P 500 companies."""
+        tickers = state["tickers"]
+        
+        # Use S&P 500 data service
+        sp500_service = get_sp500_data_service()
+        comprehensive_data = sp500_service.get_comprehensive_sp500_data(tickers)
+        
+        state["comprehensive_market_data"] = {
+            ticker: comprehensive_data[ticker]["market_data"] 
+            for ticker in tickers
         }
+        state["comprehensive_fundamentals"] = {
+            ticker: comprehensive_data[ticker]["fundamentals"] 
+            for ticker in tickers
+        }
+        
+        # Set primary ticker data for backward compatibility
+        primary_ticker = state["ticker"]
+        state["market_data"] = comprehensive_data[primary_ticker]["market_data"]
+        state["fundamentals"] = comprehensive_data[primary_ticker]["fundamentals"]
+        
         return state
 
-    def collect_news_data(state: StockAnalysisState) -> StockAnalysisState:
-        """Collect news and sentiment data."""
-        # Use mock news data for now
-        state["news_data"] = [
-            {
-                "title": "Strong earnings report",
-                "content": "Company reports better than expected Q4 results",
-                "timestamp": datetime.utcnow().isoformat()
+    def collect_comprehensive_news(state: StockAnalysisState) -> StockAnalysisState:
+        """Collect news for all tickers."""
+        tickers = state["tickers"]
+        
+        # Use S&P 500 service for comprehensive news
+        sp500_service = get_sp500_data_service()
+        comprehensive_news = {}
+        for ticker in tickers:
+            comprehensive_news[ticker] = sp500_service.get_news_data(ticker)
+        
+        state["comprehensive_news_data"] = comprehensive_news
+        
+        # Set primary ticker news for backward compatibility
+        primary_ticker = state["ticker"]
+        state["news_data"] = comprehensive_news[primary_ticker]
+        
+        return state
+
+    def run_historical_working_agent(state: StockAnalysisState) -> StockAnalysisState:
+        """Run historical analysis working agent."""
+        historical_result = historical_agent.run(
+            comprehensive_data={
+                ticker: {
+                    "market_data": state["comprehensive_market_data"][ticker],
+                    "fundamentals": state["comprehensive_fundamentals"][ticker]
+                }
+                for ticker in state["tickers"]
+            },
+            market_data=state.get("market_data", {})
+        )
+        
+        # Store working agent results
+        if not state.get("working_agent_results"):
+            state["working_agent_results"] = {}
+        
+        state["working_agent_results"]["historical"] = historical_result
+        
+        return state
+
+    def run_sentiment_working_agent(state: StockAnalysisState) -> StockAnalysisState:
+        """Run sentiment analysis working agent."""
+        sentiment_result = sentiment_agent.run(
+            comprehensive_news_data=state["comprehensive_news_data"],
+            market_context={
+                "market_data": state.get("market_data", {}),
+                "fundamentals": state.get("fundamentals", {})
             }
-        ]
+        )
+        
+        # Store working agent results
+        if not state["working_agent_results"]:
+            state["working_agent_results"] = {}
+        
+        state["working_agent_results"]["sentiment"] = sentiment_result
+        state["working_agent_results"]["sentiment_confidence"] = sentiment_result["sentiment_confidence"]
+        state["working_agent_results"]["historical_confidence"] = state["working_agent_results"]["historical"]["historical_confidence"]
+        
+        return state
+
+    def run_coordination_agent(state: StockAnalysisState) -> StockAnalysisState:
+        """Run coordinating agent to synthesize working agent results."""
+        coordination_result = coordination_agent.coordinate(
+            tickers=state["tickers"],
+            working_agent_results=state["working_agent_results"]
+        )
+        
+        state["coordination_summary"] = coordination_result.get("raw_analysis", "")
+        state["confidence_score"] = coordination_result.get("confidence", 0.0)
+        
+        # Check confidence threshold
+        threshold_met = coordination_result.get("threshold_met", False)
+        
+        if threshold_met and state["confidence_score"] >= confidence_threshold:
+            state["confidence_level"] = "high"
+            logger.info(f"Analysis passed confidence threshold: {state['confidence_score']:.3f}")
+        elif state["confidence_score"] >= 0.75:
+            state["confidence_level"] = "medium"
+            state["warnings"].append(f"Medium confidence ({state['confidence_score']:.3f}) - verify before acting")
+            state["warnings"].append("Below 95% confidence threshold - recommendation withheld")
+        else:
+            state["confidence_level"] = "low"
+            state["warnings"].append(f"Low confidence ({state['confidence_score']:.3f}) - insufficient for recommendation")
+            state["warnings"].append("Below 95% confidence threshold - recommendation withheld")
+        
         return state
 
     def run_prediction(state: StockAnalysisState) -> StockAnalysisState:
@@ -156,23 +272,37 @@ def create_stocksense_workflow(
         state["explanation"] = explanation
         return state
 
-    # Add nodes to workflow
+    # Add enhanced nodes to workflow
     builder.add_node("validate", validate_input)
-    builder.add_node("market_data_node", collect_market_data)
-    builder.add_node("news_data_node", collect_news_data)
-    builder.add_node("predict", run_prediction)
-    builder.add_node("sentiment", run_sentiment)
+    builder.add_node("sp500_data", collect_sp500_data)
+    builder.add_node("comprehensive_news", collect_comprehensive_news)
+    builder.add_node("historical_working", run_historical_working_agent)
+    builder.add_node("sentiment_working", run_sentiment_working_agent)
+    builder.add_node("coordination", run_coordination_agent)
+    builder.add_node("legacy_predict", run_prediction)
+    builder.add_node("legacy_sentiment", run_sentiment)
     builder.add_node("smart_money", run_smart_money)
     builder.add_node("explain", build_explanation)
 
-    # Define workflow edges
+    # Define enhanced workflow edges
     builder.set_entry_point("validate")
-    builder.add_edge("validate", "market_data_node")
-    builder.add_edge("market_data_node", "news_data_node")
-    builder.add_edge("news_data_node", "predict")
-    builder.add_edge("predict", "sentiment")
-    builder.add_edge("sentiment", "smart_money")
+    builder.add_edge("validate", "sp500_data")
+    builder.add_edge("sp500_data", "comprehensive_news")
+    
+    # Working agents run in parallel
+    builder.add_edge("comprehensive_news", "historical_working")
+    builder.add_edge("comprehensive_news", "sentiment_working")
+    
+    # Coordination agent synthesizes working agents
+    builder.add_edge("historical_working", "coordination")
+    builder.add_edge("sentiment_working", "coordination")
+    
+    # Legacy agents run in sequence after coordination
+    builder.add_edge("coordination", "legacy_predict")
+    builder.add_edge("legacy_predict", "legacy_sentiment")
+    builder.add_edge("legacy_sentiment", "smart_money")
     builder.add_edge("smart_money", "explain")
+    
     builder.set_finish_point("explain")
 
     return builder
@@ -203,6 +333,60 @@ def _calculate_95_horizon(daily_probs: List[Dict]) -> Dict:
         "end_date": daily_probs[max_confidence_days - 1]["date"] if max_confidence_days > 0 else None,
         "days": max_confidence_days,
         "drops_below_95_on": first_drop_day
+    }
+
+
+def run_enhanced_stocksense_analysis(
+    *,
+    tickers: List[str],
+    user_tier: str = "basic",
+    coordination_agent: CoordinationAgent,
+    historical_agent: HistoricalAnalysisAgent,
+    sentiment_agent: SentimentAnalysisAgent,
+    prediction_agent: PredictionAgent,
+    explanation_agent: ExplanationAgent,
+    smart_money_agent: SmartMoneyAgent,
+    data_service: Optional[DataService] = None,
+    confidence_threshold: float = 0.95,
+) -> Dict[str, any]:
+    """Enhanced StockSense workflow with coordinating agent and multiple S&P 500 companies."""
+
+    workflow = create_stocksense_workflow(
+        coordination_agent=coordination_agent,
+        historical_agent=historical_agent,
+        sentiment_agent=sentiment_agent,
+        prediction_agent=prediction_agent,
+        explanation_agent=explanation_agent,
+        smart_money_agent=smart_money_agent,
+        data_service=data_service,
+        confidence_threshold=confidence_threshold,
+    ).compile()
+
+    result_state = workflow.invoke({
+        "tickers": tickers,
+        "user_tier": user_tier,
+    })
+
+    # Enhanced response format with coordination insights
+    return {
+        "tickers": result_state["tickers"],
+        "as_of": datetime.utcnow().isoformat() + "Z",
+        "confidence_score": result_state["confidence_score"],
+        "confidence_level": result_state["confidence_level"],
+        "coordination_summary": result_state.get("coordination_summary", ""),
+        "working_agent_results": result_state["working_agent_results"],
+        "comprehensive_explanation": result_state["comprehensive_explanation"],
+        "fundamentals": result_state["comprehensive_fundamentals"],
+        "sentiment": result_state["comprehensive_sentiment"],
+        "predictions": result_state["comprehensive_predictions"],
+        "warnings": result_state["warnings"],
+        "threshold_met": result_state["confidence_score"] >= confidence_threshold,
+        "disclaimers": [
+            "This is informational only, not investment advice",
+            f"Analysis based on {len(tickers)} S&P 500 companies",
+            f"Only recommends if confidence >= {confidence_threshold}",
+            f"Last updated: {datetime.utcnow().isoformat()}Z"
+        ]
     }
 
 
@@ -326,21 +510,127 @@ def _format_metrics(fundamentals: Dict[str, float]) -> Dict[str, Dict]:
     return metrics
 
 
+def _get_mock_sp500_data(ticker: str) -> Dict[str, Any]:
+    """Generate mock S&P 500 data for demonstration."""
+    import random
+    import numpy as np
+    
+    # Mock historical data (30 days)
+    base_price = 150.0 + random.uniform(-20, 50)  # Starting price
+    market_data = []
+    
+    for i in range(30):
+        date_str = (datetime.utcnow() - timedelta(days=30-i)).strftime("%Y-%m-%d")
+        # Add some realistic price movement
+        price_change = np.random.normal(0, 0.02)
+        base_price += (base_price * price_change)
+        
+        market_data.append({
+            "date": date_str,
+            "close": round(base_price, 2),
+            "volume": int(1000000 + random.uniform(-200000, 300000)),
+            "open": round(base_price * random.uniform(0.98, 1.02), 2),
+            "high": round(base_price * random.uniform(1.01, 1.05), 2),
+            "low": round(base_price * random.uniform(0.95, 0.99), 2)
+        })
+    
+    # Mock fundamentals
+    fundamentals = {
+        "revenue_growth": round(random.uniform(-0.05, 0.15), 3),
+        "ebitda_margin": round(random.uniform(0.08, 0.35), 3),
+        "pe_ratio": round(random.uniform(10, 40), 1),
+        "debt_to_ebitda": round(random.uniform(1.0, 4.0), 1),
+        "roe": round(random.uniform(0.08, 0.25), 3),
+        "price_momentum_3m": round(random.uniform(-0.15, 0.20), 3),
+        "price_momentum_6m": round(random.uniform(-0.20, 0.30), 3),
+        "price_momentum_12m": round(random.uniform(-0.25, 0.40), 3)
+    }
+    
+    return {
+        "market_data": market_data,
+        "fundamentals": fundamentals
+    }
+
+
+def _get_mock_news_data(ticker: str) -> List[Dict[str, str]]:
+    """Generate mock news data for demonstration."""
+    import random
+    
+    news_templates = [
+        f"{ticker} reports strong Q4 earnings above analyst expectations",
+        f"{ticker} announces new product launch targeting emerging markets",
+        f"Analyst upgrades {ticker} to Buy rating citing strong fundamentals",
+        f"{ticker} CFO discusses growth strategy in investor conference",
+        f"Market sentiment towards {ticker} turns bullish after recent developments"
+    ]
+    
+    news_data = []
+    for i in range(len(news_templates)):
+        news_data.append({
+            "title": news_templates[i],
+            "content": f"Comprehensive analysis of {ticker} showing positive momentum in key market segments.",
+            "timestamp": (datetime.utcnow() - timedelta(days=i)).isoformat(),
+            "source": "Financial News",
+            "sentiment_score": random.uniform(0.6, 0.9)  # Generally positive mock sentiment
+        })
+    
+    return news_data
+
+
 if __name__ == "__main__":
-    from .agents import build_mock_llm
+    try:
+        # Try to use real OpenAI API with environment key
+        from langchain_openai import ChatOpenAI
+        import os
+        
+        if os.getenv("OPENAI_API_KEY"):
+            real_llm = ChatOpenAI(
+                model="gpt-4",
+                temperature=0.1,
+                max_tokens=2000,
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            print("Using real GPT-4 API")
+        else:
+            raise Exception("No OpenAI API key found")
+            
+    except Exception as e:
+        print(f"Could not initialize real LLM: {e}")
+        # Fallback to a configured real model if available
+        from langchain_openai import ChatOpenAI
+        real_llm = ChatOpenAI(
+            model="gpt-3.5-turbo",  # Use cheaper model as fallback
+            temperature=0.1,
+            max_tokens=1000
+        )
+    
+    from .agents import (
+        build_real_llm_agent, CoordinationAgent, HistoricalAnalysisAgent, 
+        SentimentAnalysisAgent, PredictionAgent, SentimentAgent, 
+        ExplanationAgent, SmartMoneyAgent
+    )
 
-    mock_llm = build_mock_llm("stocksense")
+    llm_wrapper = build_real_llm_agent("stocksense", real_llm)
 
-    prediction_agent = PredictionAgent(mock_llm)
-    sentiment_agent = SentimentAgent(mock_llm)
-    explanation_agent = ExplanationAgent(mock_llm)
-    smart_money_agent = SmartMoneyAgent(mock_llm)
+    # Create new coordinating and working agents with real LLM
+    coordination_agent = CoordinationAgent(llm_wrapper, confidence_threshold=0.95)
+    historical_agent = HistoricalAnalysisAgent(llm_wrapper)
+    sentiment_agent = SentimentAnalysisAgent(llm_wrapper)
+    
+    # Create legacy agents for compatibility
+    prediction_agent = PredictionAgent(llm_wrapper)
+    legacy_sentiment_agent = SentimentAgent(llm_wrapper)
+    explanation_agent = ExplanationAgent(llm_wrapper)
+    smart_money_agent = SmartMoneyAgent(llm_wrapper)
 
-    output = run_stocksense_analysis(
-        ticker="AAPL",
+    # Test enhanced workflow with multiple S&P 500 companies
+    output = run_enhanced_stocksense_analysis(
+        tickers=["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"],  # 5 S&P 500 companies
         user_tier="premium",
-        prediction_agent=prediction_agent,
+        coordination_agent=coordination_agent,
+        historical_agent=historical_agent,
         sentiment_agent=sentiment_agent,
+        prediction_agent=prediction_agent,
         explanation_agent=explanation_agent,
         smart_money_agent=smart_money_agent,
     )

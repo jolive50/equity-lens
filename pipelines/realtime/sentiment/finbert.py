@@ -120,6 +120,9 @@ class NewsSentimentProcessor:
                 "sentiment_breakdown": {"positive": 0, "negative": 0, "neutral": 0}
             }
         
+        # Filter and prioritize relevant articles
+        articles = self._filter_relevant_articles(articles)
+        
         # Extract texts for analysis
         texts = []
         headlines = []
@@ -169,6 +172,124 @@ class NewsSentimentProcessor:
                 "neutral": avg_neutral
             }
         }
+    
+    def _filter_relevant_articles(self, articles: List[Dict]) -> List[Dict]:
+        """Filter articles to prioritize financial relevance and recency."""
+        import heapq
+        
+        # Score articles based on relevance
+        scored_articles = []
+        
+        for article in articles:
+            score = 0
+            title = article.get("title", "").lower()
+            content = article.get("content", "").lower()
+            
+            # Financial relevance keywords
+            financial_keywords = [
+                "earnings", "revenue", "profit", "growth", "financial", "dividend",
+                "stock", "market", "investor", "quarterly", "guidance", "forecast",
+                "acquisition", "merger", "partnership", "product launch", "innovation"
+            ]
+            
+            for keyword in financial_keywords:
+                if keyword in title:
+                    score += 3
+                elif keyword in content:
+                    score += 1
+            
+            # Bonus for earnings-related news
+            earnings_keywords = ["earnings", "profit", "revenue", "quarterly"]
+            if any(keyword in title for keyword in earnings_keywords):
+                score += 2
+            
+            # Penalty for non-financial content
+            non_financial_keywords = ["politics", "sports", "entertainment", "weather"]
+            if any(keyword in title for keyword in non_financial_keywords):
+                score -= 5
+            
+            if score >= 0:  # Only include articles with non-negative scores
+                scored_articles.append((score, article))
+        
+        # Sort by relevance and take top articles
+        scored_articles.sort(reverse=True)
+        return [article for _, article in scored_articles[:15]]  # Limit to 15 most relevant
+    
+    def analyze_sector_sentiment(self, ticker_news_map: Dict[str, List[Dict]]) -> Dict[str, any]:
+        """Analyze sentiment across multiple S&P 500 tickers."""
+        sector_results = {}
+        
+        for ticker, articles in ticker_news_map.items():
+            sector_results[ticker] = self.process_news_articles(articles)
+        
+        # Calculate sector-wide sentiment
+        total_positive = 0
+        total_negative = 0
+        total_neutral = 0
+        total_articles = 0
+        
+        for result in sector_results.values():
+            breakdown = result["sentiment_breakdown"]
+            article_count = result["article_count"]
+            
+            total_positive += breakdown["positive"] * article_count
+            total_negative += breakdown["negative"] * article_count
+            total_neutral += breakdown["neutral"] * article_count
+            total_articles += article_count
+        
+        if total_articles == 0:
+            return {
+                "sector_sentiment": sector_results,
+                "overall_sentiment": "neutral",
+                "overall_score": 0.5,
+                "convergence_score": 0.5
+            }
+        
+        avg_positive = total_positive / total_articles
+        avg_negative = total_negative / total_articles
+        avg_neutral = total_neutral / total_articles
+        
+        # Determine overall sentiment
+        if avg_positive > max(avg_negative, avg_neutral):
+            overall_sentiment = "positive"
+            overall_score = avg_positive
+        elif avg_negative > max(avg_positive, avg_neutral):
+            overall_sentiment = "negative"
+            overall_score = avg_negative
+        else:
+            overall_sentiment = "neutral"
+            overall_score = avg_neutral
+        
+        # Calculate sentiment convergence (how much sentiment agrees across tickers)
+        sentiment_consistency = self._calculate_sentiment_consistency(sector_results)
+        
+        return {
+            "sector_sentiment": sector_results,
+            "overall_sentiment": overall_sentiment,
+            "overall_score": overall_score,
+            "convergence_score": sentiment_consistency,
+            "total_articles": total_articles
+        }
+    
+    def _calculate_sentiment_consistency(self, sector_results: Dict[str, Dict]) -> float:
+        """Calculate how consistent sentiment is across different tickers."""
+        if len(sector_results) < 2:
+            return 1.0
+        
+        sentiments = [result["current"] for result in sector_results.values()]
+        
+        # Calculate consistency based on sentiment distribution
+        sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
+        for sentiment in sentiments:
+            sentiment_counts[sentiment] += 1
+        
+        total = len(sentiments)
+        max_count = max(sentiment_counts.values())
+        
+        # Consistency score: proportion of most common sentiment
+        consistency = max_count / total
+        
+        return min(1.0, consistency)
     
     def _calculate_trend(self, sentiment_scores: List[Dict[str, float]]) -> str:
         """Calculate sentiment trend from recent scores."""
