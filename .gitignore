@@ -213,5 +213,64 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 secrets.env
-docs/IMPLEMENTATION_STATUS.md
-docs/IMPLEMENTATION_STATUS.md
+
+# API Keys and Credentials
+# What: Sensitive authentication tokens and API keys
+# Why: Never commit credentials to version control (security risk)
+# How: Use .env files or environment variables instead
+.kaggle/
+kaggle.json
+*.kaggle.json
+.huggingface/
+huggingface_token.txt
+*.token
+
+# Downloaded Data
+# What: Large datasets downloaded from Kaggle, Yahoo Finance, etc.
+# Why: Too large for git, can be re-downloaded using scripts
+# How: Use scripts/download_kaggle_data.py to fetch data
+data/training/raw/
+data/training/prepared/
+data/training/features/
+data/training/labels/
+data/smart_money/cache/
+*.csv
+!data/training/prepared/.gitkeep
+
+# Trained Models
+# What: Serialized ML models and artifacts
+# Why: Large binary files, can be retrained using scripts
+# How: Use scripts/train_forecaster.py to rebuild models
+model/artifacts/
+model/finbert/models--*
+*.pkl
+*.joblib
+*.h5
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# Model Caches
+# What: Hugging Face and other ML framework caches
+# Why: Large, can be re-downloaded automatically
+.cache/
+__pycache__/
+.transformers_cache/
+.torch/
+
+# Temporary Files
+# What: Temporary processing files
+# Why: Not needed in version control
+*.tmp
+*.temp
+*.lock
+*.log
+data/fundamentals/METRICS_CHECKLIST.md
+
+# Removed/Consolidated Documentation
+# These files have been consolidated into README.md
+TEAM_QUICKSTART.md
+SETUP_GUIDE.md
+SETUP.md
+RUNNING_INSTRUCTIONS.md
