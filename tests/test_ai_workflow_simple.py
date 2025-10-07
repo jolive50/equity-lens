@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Test script for the enhanced StockSense AI workflow.
 Demonstrates the coordinated multi-agent analysis with 95% confidence threshold.
@@ -23,14 +23,14 @@ def main():
     try:
         from pipelines.realtime.langgraph_workflow import run_enhanced_stocksense_analysis
         from pipelines.realtime.agents import (
-            build_mock_llm, CoordinationAgent, HistoricalAnalysisAgent,
+            build_openai_llm, CoordinationAgent, HistoricalAnalysisAgent,
             SentimentAnalysisAgent, PredictionAgent, ExplanationAgent,
             SmartMoneyAgent
         )
         
-        # Create mock LLM for demo (no API keys required)
-        mock_llm = build_mock_llm("ai-demo")
-        
+        # Attempt to build a real OpenAI client for the demonstration
+        llm = build_openai_llm("gpt-4o-mini")
+
         # Create AI agents with enhanced capabilities
         print("Initializing AI Agents:")
         print("  * Coordination Agent (synthesizes insights)")
@@ -41,14 +41,14 @@ def main():
         print("  * Smart Money Agent (institutions, insiders)")
         print()
         
-        coordination_agent = CoordinationAgent(mock_llm, confidence_threshold=0.95)
-        historical_agent = HistoricalAnalysisAgent(mock_llm)
-        sentiment_agent = SentimentAnalysisAgent(mock_llm)
+        coordination_agent = CoordinationAgent(llm, confidence_threshold=0.95)
+        historical_agent = HistoricalAnalysisAgent(llm)
+        sentiment_agent = SentimentAnalysisAgent(llm)
         
         # Legacy agents for compatibility
-        prediction_agent = PredictionAgent(mock_llm)
-        explanation_agent = ExplanationAgent(mock_llm)
-        smart_money_agent = SmartMoneyAgent(mock_llm)
+        prediction_agent = PredictionAgent(llm)
+        explanation_agent = ExplanationAgent(llm)
+        smart_money_agent = SmartMoneyAgent(llm)
         
         print("Executing LangGraph Multi-Agent Workflow...")
         print("  1. Validate input & prepare state")
@@ -158,6 +158,9 @@ def main():
         else:
             print(f"\nCONFIDENCE SAFEGUARD - Analysis below {95}% threshold")
         
+    except ValueError as exc:
+        print(f"OPENAI_API_KEY is required to run this demo: {exc}")
+        return
     except Exception as e:
         print(f"Error running AI workflow: {e}")
         print("\nAI Workflow Architecture Demonstrated:")

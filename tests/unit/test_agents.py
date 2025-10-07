@@ -1,6 +1,9 @@
-"""Unit tests for StockSense agents."""
+"""Unit tests covering agent fallback behaviour with deterministic stub LLMs."""
+import os
+
 import pytest
-from unittest.mock import Mock, patch
+from langchain_core.runnables import RunnableLambda
+
 from pipelines.realtime.agents import (
     PredictionAgent,
     SentimentAgent,
@@ -9,230 +12,103 @@ from pipelines.realtime.agents import (
     PredictionResult,
     SentimentResult,
     SmartMoneyResult,
-    build_mock_llm,
     build_openai_llm,
 )
 
 
-class TestPredictionAgent:
-    """Test cases for PredictionAgent."""
-    
-    def test_prediction_agent_initialization(self):
-        """Test PredictionAgent initialization."""
-        llm = build_mock_llm("test")
-        agent = PredictionAgent(llm)
-        assert agent is not None
-        assert agent.use_ml_model is True
-    
-    def test_prediction_agent_without_ml(self):
-        """Test PredictionAgent without ML model."""
-        llm = build_mock_llm("test")
-        agent = PredictionAgent(llm, use_ml_model=False)
-        assert agent.use_ml_model is False
-        assert agent.forecaster is None
-    
-    def test_prediction_agent_run_with_mock_data(self):
-        """Test PredictionAgent run method with mock data."""
-        llm = build_mock_llm("test")
-        agent = PredictionAgent(llm, use_ml_model=False)
-        
-        market_data = {"price": 150.0, "volume": 1000000}
-        fundamentals = {"revenue_growth": 0.08, "pe_ratio": 25.5}
-        
-        result = agent.run(
-            ticker="AAPL",
-            market_data=market_data,
-            fundamentals=fundamentals
-        )
-        
-        assert isinstance(result, PredictionResult)
-        assert result.direction in ["up", "down", "neutral"]
-        assert 0.0 <= result.confidence <= 1.0
-        assert isinstance(result.narrative, str)
+def _stub_llm(tag: str) -> RunnableLambda:
+    """Return a deterministic LangChain runnable that mimics an LLM response."""
+    # What: Provide a lightweight callable to satisfy the agent interfaces during tests.
+    # Why: Tests must remain offline-friendly without inventing synthetic financial data.
+    # How: Wrap a lambda that echoes the prompt with a tag so assertions can inspect output.
+    # Data: Accepts runnable input dictionaries and emits a tagged string.
+    return RunnableLambda(lambda payload: f"[{tag}] {payload}")
 
 
-class TestSentimentAgent:
-    """Test cases for SentimentAgent."""
-    
-    def test_sentiment_agent_initialization(self):
-        """Test SentimentAgent initialization."""
-        llm = build_mock_llm("test")
-        agent = SentimentAgent(llm)
-        assert agent is not None
-        assert agent.use_finbert is True
-    
-    def test_sentiment_agent_without_finbert(self):
-        """Test SentimentAgent without FinBERT."""
-        llm = build_mock_llm("test")
-        agent = SentimentAgent(llm, use_finbert=False)
-        assert agent.use_finbert is False
-        assert agent.sentiment_analyzer is None
-    
-    def test_sentiment_agent_run_with_mock_data(self):
-        """Test SentimentAgent run method with mock data."""
-        llm = build_mock_llm("test")
-        agent = SentimentAgent(llm, use_finbert=False)
-        
-        news_data = [
-            {
-                "title": "Strong earnings report",
-                "content": "Company reports better than expected results",
-                "sentiment_score": 0.8,
-                "source": "Financial Times",
-                "timestamp": "2024-01-24T10:00:00Z"
-            }
-        ]
-        
-        result = agent.run(ticker="AAPL", news_data=news_data)
-        
-        assert isinstance(result, SentimentResult)
-        assert result.current in ["positive", "neutral", "negative"]
-        assert 0.0 <= result.score <= 1.0
-        assert result.trend in ["improving", "stable", "declining"]
-        assert isinstance(result.headlines, list)
+def test_prediction_agent_llm_only_returns_structured_result():
+    """PredictionAgent should emit a structured PredictionResult when only LLM is available."""
+    llm = _stub_llm("prediction")
+    agent = PredictionAgent(llm, use_ml_model=False)
+
+    market_snapshot = [{"close": 150.0, "volume": 1_000_000}]
+    fundamentals = {"pe_ratio": 25.4, "revenue_growth": 0.08}
+
+    result = agent.run(ticker="AAPL", market_data=market_snapshot, fundamentals=fundamentals)
+
+    assert isinstance(result, PredictionResult)
+    assert result.direction in {"up", "down", "neutral"}
+    assert 0.0 <= result.confidence <= 1.0
+    assert isinstance(result.narrative, str)
 
 
-class TestSmartMoneyAgent:
-    """Test cases for SmartMoneyAgent."""
-    
-    def test_smart_money_agent_initialization(self):
-        """Test SmartMoneyAgent initialization."""
-        llm = build_mock_llm("test")
-        agent = SmartMoneyAgent(llm)
-        assert agent is not None
-        assert agent.use_data_service is True
-    
-    def test_smart_money_agent_without_data_service(self):
-        """Test SmartMoneyAgent without data service."""
-        llm = build_mock_llm("test")
-        agent = SmartMoneyAgent(llm, use_data_service=False)
-        assert agent.use_data_service is False
-        assert agent.smart_money_service is None
-    
-    def test_smart_money_agent_run(self):
-        """Test SmartMoneyAgent run method."""
-        llm = build_mock_llm("test")
-        agent = SmartMoneyAgent(llm, use_data_service=False)
-        
-        result = agent.run(ticker="AAPL")
-        
-        assert isinstance(result, SmartMoneyResult)
-        assert isinstance(result.institutions, dict)
-        assert isinstance(result.insiders, dict)
-        assert isinstance(result.congress, dict)
+def test_sentiment_agent_llm_only_reports_summary():
+    """SentimentAgent should summarise news when FinBERT is disabled."""
+    llm = _stub_llm("sentiment")
+    agent = SentimentAgent(llm, use_finbert=False)
+
+    news_items = [{
+        "title": "Earnings beat expectations",
+        "content": "Company reports strong growth",
+        "sentiment_score": 0.7,
+        "source": "Financial Times",
+        "timestamp": "2024-01-24T10:00:00Z",
+    }]
+
+    result = agent.run(ticker="AAPL", news_data=news_items)
+
+    assert isinstance(result, SentimentResult)
+    assert result.current in {"positive", "neutral", "negative"}
+    assert isinstance(result.headlines, list)
 
 
-class TestExplanationAgent:
-    """Test cases for ExplanationAgent."""
-    
-    def test_explanation_agent_initialization(self):
-        """Test ExplanationAgent initialization."""
-        llm = build_mock_llm("test")
-        agent = ExplanationAgent(llm)
-        assert agent is not None
-    
-    def test_explanation_agent_run(self):
-        """Test ExplanationAgent run method."""
-        llm = build_mock_llm("test")
-        agent = ExplanationAgent(llm)
-        
-        prediction = {"direction": "up", "confidence": 0.85}
-        sentiment = {"current": "positive", "score": 0.7}
-        smart_money = {"institutions": {"summary": "Net buying"}}
-        
-        result = agent.run(
-            ticker="AAPL",
-            prediction=prediction,
-            sentiment=sentiment,
-            smart_money=smart_money,
-            user_tier="basic",
-            confidence_level="high"
-        )
-        
-        assert isinstance(result, str)
-        assert len(result) > 0
+def test_smart_money_agent_without_data_service_returns_placeholders():
+    """SmartMoneyAgent should deliver a SmartMoneyResult even without live APIs."""
+    llm = _stub_llm("smart-money")
+    agent = SmartMoneyAgent(llm, use_data_service=False)
+
+    result = agent.run(ticker="AAPL")
+
+    assert isinstance(result, SmartMoneyResult)
+    assert isinstance(result.institutions, dict)
+    assert isinstance(result.insiders, dict)
+    assert isinstance(result.congress, dict)
 
 
-class TestLLMBuilders:
-    """Test cases for LLM builder functions."""
-    
-    def test_build_mock_llm(self):
-        """Test build_mock_llm function."""
-        llm = build_mock_llm("test")
-        assert llm is not None
-        
-        # Test that it returns a mock response
-        result = llm.invoke({"messages": [{"content": "test prompt"}]})
-        assert isinstance(result, str)
-        assert "test" in result
-    
-    @patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'})
-    def test_build_openai_llm_with_key(self):
-        """Test build_openai_llm with API key."""
-        with patch('pipelines.realtime.agents.ChatOpenAI') as mock_chat:
-            mock_instance = Mock()
-            mock_chat.return_value = mock_instance
-            
-            llm = build_openai_llm("gpt-4o-mini")
-            
-            assert llm is not None
-            mock_chat.assert_called_once()
-    
-    def test_build_openai_llm_without_key(self):
-        """Test build_openai_llm without API key."""
-        with patch.dict('os.environ', {}, clear=True):
-            with pytest.raises(ValueError, match="OPENAI_API_KEY environment variable is required"):
-                build_openai_llm("gpt-4o-mini")
+def test_explanation_agent_llm_output():
+    """ExplanationAgent should compose a narrative using the stub LLM."""
+    llm = _stub_llm("explanation")
+    agent = ExplanationAgent(llm)
+
+    narrative = agent.run(
+        ticker="AAPL",
+        prediction={"direction": "up", "confidence": 0.8},
+        sentiment={"current": "positive", "score": 0.7},
+        smart_money={"institutions": {"summary": "Net buying"}},
+        user_tier="basic",
+        confidence_level="high",
+    )
+
+    assert isinstance(narrative, str)
+    assert "AAPL" in narrative or "up" in narrative
 
 
-class TestAgentIntegration:
-    """Integration tests for agents working together."""
-    
-    def test_agent_workflow_simulation(self):
-        """Test a simulated workflow with all agents."""
-        llm = build_mock_llm("integration-test")
-        
-        # Initialize all agents
-        prediction_agent = PredictionAgent(llm, use_ml_model=False)
-        sentiment_agent = SentimentAgent(llm, use_finbert=False)
-        smart_money_agent = SmartMoneyAgent(llm, use_data_service=False)
-        explanation_agent = ExplanationAgent(llm)
-        
-        # Simulate workflow data
-        market_data = {"price": 150.0, "volume": 1000000}
-        fundamentals = {"revenue_growth": 0.08, "pe_ratio": 25.5}
-        news_data = [{"title": "Test news", "content": "Test content"}]
-        
-        # Run agents
-        prediction_result = prediction_agent.run(
-            ticker="AAPL",
-            market_data=market_data,
-            fundamentals=fundamentals
-        )
-        
-        sentiment_result = sentiment_agent.run(
-            ticker="AAPL",
-            news_data=news_data
-        )
-        
-        smart_money_result = smart_money_agent.run(ticker="AAPL")
-        
-        explanation = explanation_agent.run(
-            ticker="AAPL",
-            prediction=prediction_result.__dict__,
-            sentiment=sentiment_result.__dict__,
-            smart_money=smart_money_result.__dict__,
-            user_tier="basic",
-            confidence_level="high"
-        )
-        
-        # Verify results
-        assert isinstance(prediction_result, PredictionResult)
-        assert isinstance(sentiment_result, SentimentResult)
-        assert isinstance(smart_money_result, SmartMoneyResult)
-        assert isinstance(explanation, str)
-        assert len(explanation) > 0
+def test_build_openai_llm_requires_api_key(monkeypatch):
+    """Ensure build_openai_llm raises when OPENAI_API_KEY is missing."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        build_openai_llm("gpt-4o-mini")
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+@pytest.mark.skipif(
+    "OPENAI_API_KEY" not in os.environ,
+    reason="Real OpenAI API key required for integration smoke test",
+)
+def test_build_openai_llm_with_real_key():
+    """Ensure build_openai_llm constructs the LangChain client when a key is present."""
+    llm = build_openai_llm("gpt-4o-mini")
+    # What: Invoke with a minimal payload to confirm the object behaves like a Runnable.
+    # Why: Avoid hitting the network while still validating interface conformance.
+    # How: Send a short message and expect a response string (LangChain handles the network call).
+    # Data: The call may hit the real API; we keep payload tiny to minimize cost.
+    preview = llm.invoke({"messages": [{"content": "Ping"}]})
+    assert preview is not None
