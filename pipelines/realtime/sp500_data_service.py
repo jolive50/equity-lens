@@ -5,7 +5,9 @@ using dependency injection and interface segregation for maintainable, testable 
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Any, Protocol, Union
 from datetime import datetime
 
 try:
@@ -26,6 +28,97 @@ except ImportError:
 from .api_keys import get_available_api_keys
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class DataQualitySummary:
+    """Structured view of the validation metrics for a ticker."""
+
+    historical_data_points: int
+    fundamental_metrics_count: int
+    news_articles_count: int
+    validation_timestamp: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the summary into the dict shape expected by downstream code."""
+        return {
+            "historical_data_points": self.historical_data_points,
+            "fundamental_metrics_count": self.fundamental_metrics_count,
+            "news_articles_count": self.news_articles_count,
+            "validation_timestamp": self.validation_timestamp,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessedTickerData:
+    """Normalized payload for a single ticker."""
+
+    ticker: str
+    market_data: List[Dict[str, Any]]
+    fundamentals: Dict[str, float]
+    news_data: List[Dict[str, Any]]
+    data_quality: DataQualitySummary
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return the dict representation expected by the public API."""
+        return {
+            "ticker": self.ticker,
+            "market_data": self.market_data,
+            "fundamentals": self.fundamentals,
+            "news_data": self.news_data,
+            "data_quality": self.data_quality.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SectorAnalysisSummary:
+    """Structured sector insights derived from multiple tickers."""
+
+    overall_trend: str
+    confidence: float
+    strong_performers: List[str]
+    weak_performers: List[str]
+    key_metrics: Dict[str, float]
+    sample_size: int
+    analysis_timestamp: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "overall_trend": self.overall_trend,
+            "confidence": self.confidence,
+            "strong_performers": self.strong_performers,
+            "weak_performers": self.weak_performers,
+            "key_metrics": self.key_metrics,
+            "sample_size": self.sample_size,
+            "analysis_timestamp": self.analysis_timestamp,
+        }
+
+
+class TickerDataProcessor(Protocol):
+    """Protocol for objects able to validate and standardize ticker data."""
+
+    def process_ticker_data(
+        self,
+        ticker: str,
+        historical_data: List[Dict[str, Any]],
+        fundamentals: Dict[str, float],
+        news_data: List[Dict[str, Any]],
+    ) -> Union[ProcessedTickerData, Dict[str, Any]]:
+        ...
+
+
+class SP500ServiceError(RuntimeError):
+    """Raised when the S&P 500 data service cannot fulfill a request."""
+
+
+def _serialise_ticker_payload(
+    payload: Union[ProcessedTickerData, Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Convert validator output into the public dict representation."""
+
+    if isinstance(payload, ProcessedTickerData):
+        return payload.to_dict()
+    return payload
 
 
 class TickerListProvider:
@@ -55,35 +148,36 @@ class TickerListProvider:
         return validated
 
 
-class DataProcessingValidator:
+class DataProcessingValidator(TickerDataProcessor):
     """Validates and processes financial data quality."""
     
     @staticmethod
-    def process_ticker_data(ticker: str, historical_data: List[Dict], 
-                           fundamentals: Dict[str, float], 
-                           news_data: List[Dict]) -> Dict[str, Any]:
+    def process_ticker_data(
+        ticker: str,
+        historical_data: List[Dict[str, Any]],
+        fundamentals: Dict[str, float],
+        news_data: List[Dict[str, Any]],
+    ) -> ProcessedTickerData:
         """Process and validate data for a single ticker."""
         
         # Validate each data component
         validated_historical = DataValidationService.validate_historical_data(historical_data)
         validated_fundamentals = DataValidationService.validate_fundamentals(fundamentals)
-        
-        return {
-            "ticker": ticker.upper(),
-            "market_data": validated_historical,
-            "fundamentals": validated_fundamentals, 
-            "news_data": news_data,  # News doesn't need numerical validation
-            "data_quality": {
-                "historical_data_points": len(validated_historical),
-                "fundamental_metrics_count": len(validated_fundamentals),
-                "news_articles_count": len(news_data),
-                "validation_timestamp": datetime.utcnow().isoformat()
-            }
-        }
 
+        quality = DataQualitySummary(
+            historical_data_points=len(validated_historical),
+            fundamental_metrics_count=len(validated_fundamentals),
+            news_articles_count=len(news_data),
+            validation_timestamp=datetime.utcnow().isoformat(),
+        )
 
-class FinancialDataValidator:
-    """Validates financial analysis (Single Responsibility Principle)."""
+        return ProcessedTickerData(
+            ticker=ticker.upper(),
+            market_data=validated_historical,
+            fundamentals=validated_fundamentals,
+            news_data=news_data,  # News payload already structured
+            data_quality=quality,
+        )
 
 
 class SP500DataService:
@@ -95,22 +189,38 @@ class SP500DataService:
     
     def __init__(self, 
                  data_provider: Optional[FinancialDataProvider] = None,
-                 validator: Optional[Any] = None,
-                 ticker_provider: Optional[TickerListProvider] = None):
+                 validator: Optional[TickerDataProcessor] = None,
+                 ticker_provider: Optional[TickerListProvider] = None,
+                 request_interval: float = 0.5):
         """Initialize with dependency injection.
         
         Args:
             data_provider: Financial data provider implementation
             validator: Data validator instance
             ticker_provider: Ticker list provider instance
+            request_interval: Friendly delay between provider requests (seconds)
         """
         self.data_provider = data_provider or YahooFinanceProvider(
             rate_limiter=APIRateLimiter(requests_per_minute=12)
         )
-        self.validator = validator or DataProcessingValidator()
+        self.validator: TickerDataProcessor = validator or DataProcessingValidator()
         self.ticker_provider = ticker_provider or TickerListProvider()
+        self._request_interval = max(0.0, request_interval)
         
-        logger.info("SP500DataService initialized with dependencies")
+        logger.info(
+            "SP500DataService initialized with dependencies (request interval %.2fs)",
+            self._request_interval,
+        )
+
+    @property
+    def request_interval(self) -> float:
+        """Expose the polite delay applied between provider calls."""
+        return self._request_interval
+
+    def _throttle(self) -> None:
+        """Respect upstream rate limits by pausing between calls when configured."""
+        if self._request_interval > 0:
+            time.sleep(self._request_interval)
     
     def get_single_ticker_data(self, ticker: str) -> Dict[str, Any]:
         """Get comprehensive data for a single ticker.
@@ -123,7 +233,7 @@ class SP500DataService:
             
         Raises:
             ValueError: If ticker is invalid
-            RuntimeError: If data retrieval fails
+            SP500ServiceError: If data retrieval fails
         """
         if not DataValidationService.validate_ticker(ticker):
             raise ValueError(f"Invalid ticker symbol: {ticker}")
@@ -138,16 +248,25 @@ class SP500DataService:
             news_data = self.data_provider.get_news_data(ticker)
             
             # Validate and process data
-            processed_data = self.validator.process_ticker_data(
+            processed_payload = self.validator.process_ticker_data(
                 ticker, historical_data, fundamentals, news_data
             )
-            
-            logger.info(f"Successfully retrieved data for {ticker}")
-            return processed_data
-            
+
+            result = _serialise_ticker_payload(processed_payload)
+
+            quality = result.get("data_quality", {})
+            logger.info(
+                "Successfully retrieved data for %s (prices=%s fundamentals=%s news=%s)",
+                ticker,
+                quality.get("historical_data_points"),
+                quality.get("fundamental_metrics_count"),
+                quality.get("news_articles_count"),
+            )
+            return result
+
         except Exception as e:
             logger.error(f"Failed to retrieve data for {ticker}: {e}")
-            raise RuntimeError(f"Data retrieval failed for {ticker}: {str(e)}")
+            raise SP500ServiceError(f"Data retrieval failed for {ticker}: {str(e)}") from e
     
     def get_multiple_tickers_data(self, tickers: List[str], 
                                  max_tickers: int = 8) -> Dict[str, Dict[str, Any]]:
@@ -162,7 +281,7 @@ class SP500DataService:
             
         Raises:
             ValueError: If no valid tickers provided
-            RuntimeError: If all data retrievals fail
+            SP500ServiceError: If all data retrievals fail
         """
         # Validate and limit ticker list
         validated_tickers = self.ticker_provider.validate_ticker_list(tickers)[:max_tickers]
@@ -172,7 +291,7 @@ class SP500DataService:
         
         logger.info(f"Processing {len(validated_tickers)} tickers: {validated_tickers}")
         
-        results = {}
+        results: Dict[str, Dict[str, Any]] = {}
         errors = []
         
         for i, ticker in enumerate(validated_tickers):
@@ -182,8 +301,7 @@ class SP500DataService:
                 results[ticker] = ticker_data
                 
                 # Add small delay between requests to be respectful
-                import time
-                time.sleep(0.5)
+                self._throttle()
                 
             except Exception as ticker_error:
                 logger.error(f"Failed to process {ticker}: {ticker_error}")
@@ -191,7 +309,9 @@ class SP500DataService:
                 continue
         
         if not results:
-            raise RuntimeError(f"Failed to retrieve data for any ticker. Errors: {errors}")
+            raise SP500ServiceError(
+                f"Failed to retrieve data for any ticker. Errors: {errors}"
+            )
         
         logger.info(f"Successfully processed {len(results)}/{len(validated_tickers)} tickers")
         return results
@@ -216,6 +336,9 @@ class SP500DataService:
             
         Returns:
             Analysis results including trends and confidence metrics
+
+        Raises:
+            SP500ServiceError: If the sector analysis cannot be completed
         """
         logger.info(f"Performing sector analysis for {len(tickers)} tickers")
         
@@ -252,34 +375,25 @@ class SP500DataService:
             avg_pe = sum(pe_ratios) / len(pe_ratios) if pe_ratios else 0
             avg_roe = sum(roes) / len(roes) if roes else 0
             
-            # Determine confidence level
-            confidence = FinancialDataValidator._calculate_sector_confidence(
-                avg_revenue_growth, avg_roe, len(ticker_data), len(strong_performers)
+            summary = FinancialDataValidator.build_sector_summary(
+                avg_revenue_growth=avg_revenue_growth,
+                avg_pe=avg_pe,
+                avg_roe=avg_roe,
+                sample_size=len(ticker_data),
+                strong_performers=strong_performers,
+                weak_performers=weak_performers,
             )
             
-            # Determine overall trend
-            trend = FinancialDataValidator._determine_sector_trend(avg_revenue_growth, avg_roe)
-            
-            sector_analysis = {
-                "overall_trend": trend,
-                "confidence": confidence,
-                "strong_performers": strong_performers,
-                "weak_performers": weak_performers,
-                "key_metrics": {
-                    "avg_revenue_growth": round(avg_revenue_growth, 3),
-                    "avg_pe_ratio": round(avg_pe, 2),
-                    "avg_roe": round(avg_roe, 3)
-                },
-                "sample_size": len(ticker_data),
-                "analysis_timestamp": datetime.utcnow().isoformat()
-            }
-            
-            logger.info(f"Sector analysis completed: {trend} trend, {confidence:.2f} confidence")
-            return sector_analysis
+            logger.info(
+                "Sector analysis completed: %s trend, %.2f confidence",
+                summary.overall_trend,
+                summary.confidence,
+            )
+            return summary.to_dict()
             
         except Exception as e:
             logger.error(f"Sector analysis failed: {e}")
-            raise RuntimeError(f"Sector analysis failed: {str(e)}")
+            raise SP500ServiceError(f"Sector analysis failed: {str(e)}") from e
 
     @property
     def available_tickers(self) -> List[str]:
@@ -289,6 +403,39 @@ class SP500DataService:
 
 class FinancialDataValidator:
     """Extended validator for financial analysis."""
+
+    @classmethod
+    def build_sector_summary(
+        cls,
+        *,
+        avg_revenue_growth: float,
+        avg_pe: float,
+        avg_roe: float,
+        sample_size: int,
+        strong_performers: List[str],
+        weak_performers: List[str],
+    ) -> SectorAnalysisSummary:
+        """Aggregate metrics into a structured sector summary."""
+
+        confidence = cls._calculate_sector_confidence(
+            avg_revenue_growth, avg_roe, sample_size, len(strong_performers)
+        )
+        trend = cls._determine_sector_trend(avg_revenue_growth, avg_roe)
+        key_metrics = {
+            "avg_revenue_growth": round(avg_revenue_growth, 3),
+            "avg_pe_ratio": round(avg_pe, 2),
+            "avg_roe": round(avg_roe, 3),
+        }
+
+        return SectorAnalysisSummary(
+            overall_trend=trend,
+            confidence=confidence,
+            strong_performers=strong_performers,
+            weak_performers=weak_performers,
+            key_metrics=key_metrics,
+            sample_size=sample_size,
+            analysis_timestamp=datetime.utcnow().isoformat(),
+        )
     
     @staticmethod
     def _calculate_sector_confidence(avg_revenue_growth: float, avg_roe: float, 

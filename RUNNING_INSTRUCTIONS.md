@@ -517,7 +517,8 @@ Edit `pipelines/realtime/agents.py` to:
 ### 4. Add More Tickers
 
 Edit `pipelines/realtime/sp500_data_service.py`:
-- Line 33-40: Add more DEFAULT_TICKERS
+- Update `TickerListProvider.DEFAULT_TICKERS` to add or remove tracked symbols
+- Extend `DataQualitySummary` if you need additional quality metrics surfaced to the frontend
 
 ---
 
