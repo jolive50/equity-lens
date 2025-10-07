@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StockSense Frontend
 
-## Getting Started
+This package hosts the StockSense web experience built on the Next.js App Router.
+It consumes the FastAPI backend (`pipelines.realtime.api`) to surface multi-agent
+stock analysis, watchlists, and reporting.
 
-First, run the development server:
+## Prerequisites
+
+- Node.js 18 or newer (bundled npm works fine)
+- Backend API running locally at `http://localhost:8000`
+
+## Installation
+
+From the project root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd frontend
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create a local environment file whenever you need to override defaults:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cp .env.local.example .env.local   # PowerShell: Copy-Item .env.local.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`NEXT_PUBLIC_BACKEND_API_BASE` should match the address of the FastAPI service.
 
-## Learn More
+## Development
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run dev          # Start the dev server on http://localhost:3000
+npm run lint         # ESLint checks (uses next lint)
+npm test             # Jest + React Testing Library
+npm run build        # Production build preview
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The App Router lives under `src/app/` with route groups for dashboards, news, and
+API proxies (`src/app/api/*`). Reusable UI lives in `src/components/`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Linking to the Backend
 
-## Deploy on Vercel
+The API routes under `src/app/api/` act as thin proxies to the Python backend. For
+new endpoints:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Add a handler in `src/app/api/<endpoint>/route.ts`.
+2. Forward requests to `process.env.NEXT_PUBLIC_BACKEND_API_BASE`.
+3. Surface typed responses through a shared client (planned: `frontend/lib/api-client.ts`).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Testing Strategy
+
+- **Unit/component tests** - `npm test` executes Jest suites covering UI components.
+- **Integration** - use Playwright or Cypress (not yet configured) for end-to-end flows.
+- **Backend parity** - run `python scripts/run_tests.py` in the repo root to ensure
+  the API contract matches the expectations in the proxy routes.
+
+## Project Layout (abridged)
+
+```
+frontend/
+|-- public/                    # Static assets
+|-- src/
+|   |-- app/
+|   |   |-- api/               # Proxy routes for backend endpoints
+|   |   |-- dashboard/         # Authenticated dashboard shell
+|   |   |-- news/              # Market news page
+|   |   |-- layout.tsx         # Global page layout
+|   |   `-- page.tsx           # Landing page defaults
+|   |-- components/            # Charts, loaders, error boundaries
+|   `-- styles/                # Global styles if needed
+|-- package.json
+`-- README.md
+```
+
+## Troubleshooting
+
+- If API calls fail, verify the FastAPI server is running and the `.env.local`
+  value for `NEXT_PUBLIC_BACKEND_API_BASE` is correct.
+- Next.js caches responses aggressively; restart `npm run dev` after updating
+  environment variables.
+- Tailwind, Radix, and chart libraries are already configured-import components
+  directly from `src/components/`.

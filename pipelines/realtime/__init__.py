@@ -1,4 +1,4 @@
-"""LangChain-only orchestration utilities for realtime pipelines."""
+"""LangGraph-first orchestration utilities for realtime pipelines."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _newsapi_node(req: CollectNewsRequest) -> str:
 
 
 def run_collect_news(req: CollectNewsRequest) -> dict:
-    """Run a simple parallel LangChain graph to collect news from sources."""
+    """Run a simple parallel LangGraph graph to collect news from sources."""
 
     graph = RunnableParallel(
         yahoo=RunnableLambda(_yahoo_node),

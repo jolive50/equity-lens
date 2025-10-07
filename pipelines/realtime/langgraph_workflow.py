@@ -662,16 +662,9 @@ if __name__ == "__main__":
     # How: Spin up LLM clients, instantiate agents, and execute the enhanced analysis pipeline
     # Data: Prints a JSON blob with predictions, sentiment, and coordination summaries
     try:
-        # What: Prefer the high-accuracy GPT-4 backend when an API key is available
-        # Why: Produces richer narratives and more reliable coordination summaries during demos
-        # How: Fetch the OpenAI API key via the central helper and configure the ChatOpenAI client
-        # Data: Sends prompts to OpenAI's API only when the key is present
         from langchain_openai import ChatOpenAI
 
-        api_key = get_api_key("openai")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is required to run the demo workflow")
-
+        api_key = get_api_key("openai", required=True)
         real_llm = ChatOpenAI(
             model="gpt-4",
             temperature=0.1,
@@ -679,24 +672,8 @@ if __name__ == "__main__":
             api_key=api_key
         )
         print("Using real GPT-4 API")
-            
     except Exception as e:
-        # What: Notify the developer that the preferred GPT-4 client could not be created
-        # Why: Visibility into credential or network issues makes debugging smoother
-        # How: Print the exception message directly to the console
-        # Data: Includes the Python exception string only; no secret values are logged
-        print(f"Could not initialize real LLM: {e}")
-        # What: Fall back to a lighter GPT-3.5 model so the demo still runs
-        # Why: Keeps the script usable when premium models are unavailable or cost-prohibitive
-        # How: Instantiate ChatOpenAI with the 3.5 turbo model and modest generation settings
-        # Data: Future prompt traffic will target the GPT-3.5 endpoint instead of GPT-4
-        from langchain_openai import ChatOpenAI
-        real_llm = ChatOpenAI(
-            model="gpt-3.5-turbo",  # Use cheaper model as fallback
-            temperature=0.1,
-            max_tokens=1000,
-            api_key=get_api_key("openai", required=True)
-        )
+        raise RuntimeError("Could not initialize the OpenAI client for the demo workflow.") from e
     
     from .agents import (
         build_real_llm_agent, CoordinationAgent, HistoricalAnalysisAgent, 
@@ -718,8 +695,8 @@ if __name__ == "__main__":
     # Create legacy agents for compatibility
     # What: Build the traditional single-agent components that certain endpoints still call
     # Why: Ensures backwards-compatible paths continue to function during manual tests
-    # How: Reuse the same wrapper so fallbacks and narratives align with the coordinating agents
-    # Data: These agents will rely on the LLM or internal models depending on configuration
+    # How: Reuse the same wrapper so narratives align with the coordinating agents
+    # Data: These agents will rely on the deterministic ML pipelines plus the explanation LLM
     prediction_agent = PredictionAgent(llm_wrapper)
     legacy_sentiment_agent = SentimentAgent(llm_wrapper)
     explanation_agent = ExplanationAgent(llm_wrapper)

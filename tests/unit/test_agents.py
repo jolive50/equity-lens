@@ -1,81 +1,161 @@
-"""Unit tests covering agent fallback behaviour with deterministic stub LLMs."""
-import os
+"""Unit tests for deterministic agent behaviours (no LLM fallbacks)."""
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.runnables import RunnableLambda
 
 from pipelines.realtime.agents import (
+    ExplanationAgent,
     PredictionAgent,
     SentimentAgent,
     SmartMoneyAgent,
-    ExplanationAgent,
-    PredictionResult,
-    SentimentResult,
-    SmartMoneyResult,
-    build_openai_llm,
 )
+from pipelines.realtime.models.forecaster import ForecastResult
 
 
 def _stub_llm(tag: str) -> RunnableLambda:
-    """Return a deterministic LangChain runnable that mimics an LLM response."""
-    # What: Provide a lightweight callable to satisfy the agent interfaces during tests.
-    # Why: Tests must remain offline-friendly without inventing synthetic financial data.
-    # How: Wrap a lambda that echoes the prompt with a tag so assertions can inspect output.
-    # Data: Accepts runnable input dictionaries and emits a tagged string.
+    """Return a deterministic runnable that echoes payloads with a tag."""
     return RunnableLambda(lambda payload: f"[{tag}] {payload}")
 
 
-def test_prediction_agent_llm_only_returns_structured_result():
-    """PredictionAgent should emit a structured PredictionResult when only LLM is available."""
-    llm = _stub_llm("prediction")
-    agent = PredictionAgent(llm, use_ml_model=False)
+def test_prediction_agent_uses_ml_forecaster(monkeypatch):
+    """PredictionAgent must rely entirely on the gradient boosting forecaster."""
+    agent = PredictionAgent()
 
-    market_snapshot = [{"close": 150.0, "volume": 1_000_000}]
+    stub_result = ForecastResult(
+        direction="up",
+        confidence=0.87,
+        daily_probs=[{"day": 1, "up": 0.8, "down": 0.1, "neutral": 0.1}],
+        horizon_95={"days": 3},
+        feature_importance={"momentum": 0.6, "volume_trend": 0.4},
+        model_metadata={"probabilities": {"up": 0.87, "down": 0.05, "neutral": 0.08}},
+    )
+    agent.forecaster = MagicMock()
+    agent.forecaster.predict.return_value = stub_result
+
+    market_snapshot = [{"close": 150.0, "volume": 1_000_000} for _ in range(60)]
     fundamentals = {"pe_ratio": 25.4, "revenue_growth": 0.08}
 
     result = agent.run(ticker="AAPL", market_data=market_snapshot, fundamentals=fundamentals)
 
-    assert isinstance(result, PredictionResult)
-    assert result.direction in {"up", "down", "neutral"}
-    assert 0.0 <= result.confidence <= 1.0
-    assert isinstance(result.narrative, str)
+    agent.forecaster.predict.assert_called_once()
+    assert result.direction == "up"
+    assert result.confidence == pytest.approx(0.87)
+    assert "Probability distribution" in result.narrative
 
 
-def test_sentiment_agent_llm_only_reports_summary():
-    """SentimentAgent should summarise news when FinBERT is disabled."""
-    llm = _stub_llm("sentiment")
-    agent = SentimentAgent(llm, use_finbert=False)
+def test_prediction_agent_raises_when_forecaster_fails(monkeypatch):
+    """If the ML forecaster raises, the agent must propagate a RuntimeError."""
+    agent = PredictionAgent()
+    agent.forecaster = MagicMock(side_effect=RuntimeError("boom"))
 
+    with pytest.raises(RuntimeError, match="Gradient boosting forecaster failed"):
+        agent.run(ticker="MSFT", market_data=[{"close": 120, "volume": 5_000}], fundamentals={})
+
+
+def test_sentiment_agent_uses_finbert(monkeypatch):
+    """SentimentAgent should call FinBERT and surface its structured response."""
+
+    class StubAnalyzer:
+        def process_news_articles(self, articles):
+            return {
+                "current": "positive",
+                "score": 0.78,
+                "trend": "improving",
+                "headlines": ["Stub headline"],
+            }
+
+    monkeypatch.setattr(
+        "pipelines.realtime.agents.create_sentiment_analyzer",
+        lambda: StubAnalyzer(),
+    )
+
+    agent = SentimentAgent()
     news_items = [{
         "title": "Earnings beat expectations",
         "content": "Company reports strong growth",
-        "sentiment_score": 0.7,
-        "source": "Financial Times",
         "timestamp": "2024-01-24T10:00:00Z",
+        "source": "Financial Times",
     }]
 
     result = agent.run(ticker="AAPL", news_data=news_items)
 
-    assert isinstance(result, SentimentResult)
-    assert result.current in {"positive", "neutral", "negative"}
-    assert isinstance(result.headlines, list)
+    assert result.current == "positive"
+    assert result.trend == "improving"
+    assert result.headlines == ["Stub headline"]
 
 
-def test_smart_money_agent_without_data_service_returns_placeholders():
-    """SmartMoneyAgent should deliver a SmartMoneyResult even without live APIs."""
-    llm = _stub_llm("smart-money")
-    agent = SmartMoneyAgent(llm, use_data_service=False)
+def test_sentiment_agent_raises_when_finbert_missing(monkeypatch):
+    """Instantiating SentimentAgent without FinBERT assets should fail fast."""
 
-    result = agent.run(ticker="AAPL")
+    def _raise():
+        raise ImportError("no finbert")
 
-    assert isinstance(result, SmartMoneyResult)
-    assert isinstance(result.institutions, dict)
-    assert isinstance(result.insiders, dict)
-    assert isinstance(result.congress, dict)
+    monkeypatch.setattr(
+        "pipelines.realtime.agents.create_sentiment_analyzer",
+        _raise,
+    )
+
+    with pytest.raises(RuntimeError, match="FinBERT dependencies are missing"):
+        SentimentAgent()
+
+
+def test_smart_money_agent_uses_data_service(monkeypatch):
+    """SmartMoneyAgent must delegate to the configured data service."""
+
+    class StubSmartMoneyService:
+        def get_institutional_summary(self, ticker: str):
+            return {"summary": f"{ticker} institutional"}
+
+        def get_insider_summary(self, ticker: str):
+            return {"summary": f"{ticker} insiders"}
+
+        def get_congressional_summary(self, ticker: str):
+            return {"summary": f"{ticker} congress"}
+
+    monkeypatch.setattr(
+        "pipelines.realtime.agents.create_smart_money_service",
+        lambda api_keys: StubSmartMoneyService(),
+    )
+    monkeypatch.setattr(
+        "pipelines.realtime.agents.get_available_api_keys",
+        lambda *args: {"alpha_vantage": "x"},
+    )
+
+    agent = SmartMoneyAgent()
+    result = agent.run(ticker="TSLA")
+
+    assert result.institutions["summary"] == "TSLA institutional"
+    assert result.insiders["summary"] == "TSLA insiders"
+    assert result.congress["summary"] == "TSLA congress"
+
+
+def test_smart_money_agent_raises_on_service_failure(monkeypatch):
+    """If the underlying service raises, the agent should bubble up the error."""
+
+    class FailingService:
+        def get_institutional_summary(self, ticker: str):
+            raise RuntimeError("service down")
+
+    monkeypatch.setattr(
+        "pipelines.realtime.agents.create_smart_money_service",
+        lambda api_keys: FailingService(),
+    )
+    monkeypatch.setattr(
+        "pipelines.realtime.agents.get_available_api_keys",
+        lambda *args: {"alpha_vantage": "x"},
+    )
+
+    agent = SmartMoneyAgent()
+    with pytest.raises(RuntimeError, match="Smart money service failed"):
+        agent.run(ticker="TSLA")
 
 
 def test_explanation_agent_llm_output():
-    """ExplanationAgent should compose a narrative using the stub LLM."""
+    """ExplanationAgent still relies on LLM generation for narratives."""
     llm = _stub_llm("explanation")
     agent = ExplanationAgent(llm)
 
@@ -89,26 +169,4 @@ def test_explanation_agent_llm_output():
     )
 
     assert isinstance(narrative, str)
-    assert "AAPL" in narrative or "up" in narrative
-
-
-def test_build_openai_llm_requires_api_key(monkeypatch):
-    """Ensure build_openai_llm raises when OPENAI_API_KEY is missing."""
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        build_openai_llm("gpt-4o-mini")
-
-
-@pytest.mark.skipif(
-    "OPENAI_API_KEY" not in os.environ,
-    reason="Real OpenAI API key required for integration smoke test",
-)
-def test_build_openai_llm_with_real_key():
-    """Ensure build_openai_llm constructs the LangChain client when a key is present."""
-    llm = build_openai_llm("gpt-4o-mini")
-    # What: Invoke with a minimal payload to confirm the object behaves like a Runnable.
-    # Why: Avoid hitting the network while still validating interface conformance.
-    # How: Send a short message and expect a response string (LangChain handles the network call).
-    # Data: The call may hit the real API; we keep payload tiny to minimize cost.
-    preview = llm.invoke({"messages": [{"content": "Ping"}]})
-    assert preview is not None
+    assert "[explanation]" in narrative

@@ -63,32 +63,13 @@ class FinBERTSentimentAnalyzer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         try:
-            # Tokenizer: Converts text to numbers (tokens)
-            # Example: "Apple stock rises" → [101, 2533, 4518, 8085, 102]
-            # Why: Neural networks can only process numbers, not text directly
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-            # Model: The actual neural network that makes predictions
-            # AutoModelForSequenceClassification: Specific to text classification tasks
-            # Why: FinBERT outputs 3 classes (positive, negative, neutral)
             self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
-
-            # Move model to GPU if available (much faster)
             self.model.to(self.device)
-
-            # Set to evaluation mode (disables dropout and batch normalization training behavior)
-            # Why: We're doing inference (predictions) not training
             self.model.eval()
-
             logger.info(f"FinBERT model loaded successfully on {self.device}")
-
         except Exception as e:
-            # If model loading fails (no internet, missing dependencies, etc.)
-            # Set to None so we can fallback to simpler methods
-            logger.error(f"Failed to load FinBERT model: {e}")
-            logger.warning("Sentiment analysis will use fallback method (equal probabilities)")
-            self.tokenizer = None
-            self.model = None
+            raise RuntimeError(f"Failed to load FinBERT model: {e}") from e
 
     def analyze_text(self, text: str) -> Dict[str, float]:
         """Analyze sentiment of a single text.
@@ -111,9 +92,7 @@ class FinBERTSentimentAnalyzer:
         """
         # Check if model loaded successfully
         if not self.model or not self.tokenizer:
-            logger.warning("FinBERT model not available, returning neutral sentiment")
-            # Return equal probabilities (complete uncertainty)
-            return {"positive": 0.33, "negative": 0.33, "neutral": 0.34}
+            raise RuntimeError("FinBERT model is not available; ensure it is downloaded before running analysis.")
 
         try:
             # Tokenize the input text
@@ -162,10 +141,7 @@ class FinBERTSentimentAnalyzer:
             }
 
         except Exception as e:
-            # If anything goes wrong (GPU out of memory, invalid text, etc.)
-            logger.error(f"Error analyzing text: {e}")
-            # Return neutral sentiment as fallback
-            return {"positive": 0.33, "negative": 0.33, "neutral": 0.34}
+            raise RuntimeError(f"Error analyzing text with FinBERT: {e}") from e
 
     def analyze_batch(self, texts: List[str]) -> List[Dict[str, float]]:
         """Analyze sentiment of multiple texts at once.
@@ -194,9 +170,7 @@ class FinBERTSentimentAnalyzer:
         """
         # Check if model loaded successfully
         if not self.model or not self.tokenizer:
-            logger.warning("FinBERT model not available, returning neutral sentiments for batch")
-            # Return neutral for all texts
-            return [{"positive": 0.33, "negative": 0.33, "neutral": 0.34} for _ in texts]
+            raise RuntimeError("FinBERT model is not available; cannot perform batch sentiment analysis.")
 
         try:
             # Tokenize all texts in batch
@@ -230,9 +204,7 @@ class FinBERTSentimentAnalyzer:
             return results
 
         except Exception as e:
-            # If batch processing fails, return neutral for all
-            logger.error(f"Error analyzing batch: {e}")
-            return [{"positive": 0.33, "negative": 0.33, "neutral": 0.34} for _ in texts]
+            raise RuntimeError(f"Error analyzing batch with FinBERT: {e}") from e
 
 
 class NewsSentimentProcessor:
@@ -293,15 +265,7 @@ class NewsSentimentProcessor:
         """
         # Handle empty input
         if not articles:
-            logger.warning("No articles provided for sentiment analysis")
-            return {
-                "current": "neutral",
-                "score": 0.5,
-                "trend": "stable",
-                "headlines": [],
-                "article_count": 0,
-                "sentiment_breakdown": {"positive": 0, "negative": 0, "neutral": 0}
-            }
+            raise ValueError("At least one article is required for FinBERT sentiment analysis.")
 
         # Filter articles to keep only financially relevant ones
         # Why: "Apple CEO plays golf" is less relevant than "Apple misses revenue targets"
@@ -319,6 +283,9 @@ class NewsSentimentProcessor:
 
             # Store headline (truncate to 100 chars for display)
             headlines.append(article.get('title', '')[:100])
+
+        if not texts:
+            raise RuntimeError("No financially relevant articles available for sentiment analysis.")
 
         # Analyze sentiment of all articles at once (batch processing)
         # This is much faster than analyzing one-by-one
