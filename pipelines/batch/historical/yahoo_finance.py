@@ -45,7 +45,7 @@ class YahooFinanceConfig:
     ] = "1d"
     auto_adjust: bool = True
     progress: bool = False
-    destination: str = "data/batch/raw/market/yahoo_finance/"
+    destination: str = "../data/batch/raw/market/yahoo_finance/"
 
     def __post_init__(self) -> None:
         if self.interval not in _ALLOWED_INTERVALS:
@@ -86,9 +86,9 @@ def _persist_frame(destination: Path, ticker: str, frame: pd.DataFrame, interval
     ticker_dir = destination / ticker
     ticker_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = ticker_dir / f"{ticker}_{interval}_{timestamp}.parquet"
+    file_path = ticker_dir / f"{ticker}_{interval}_{timestamp}.csv"
     try:
-        frame.to_parquet(file_path, engine="pyarrow")
+        frame.to_csv(file_path)
     except ModuleNotFoundError:  # pragma: no cover - optional dependency
         frame.to_parquet(file_path)
     return file_path
