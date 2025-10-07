@@ -1,4 +1,4 @@
-"""LangChain-compatible agent definitions for the StockSense workflow.
+"""LangGraph agent definitions for the StockSense workflow.
 
 This file defines specialized AI "agents" that each perform specific analysis tasks.
 Think of agents as expert team members: one does predictions, one analyzes news,
@@ -6,22 +6,13 @@ one tracks big investors, etc.
 
 What this file does:
 - Defines AI agent classes (PredictionAgent, SentimentAgent, etc.)
-- Each agent has specialized prompts for its task
-- Agents can use real ML models (FinBERT, forecaster) OR fallback to LLMs
-- Provides helper functions to parse agent outputs
+- Each agent has specialized logic for its task using deterministic ML pipelines
+- Provides helper functions to parse structured outputs
 
 Why we need agents:
 - Separates concerns (each agent has one job - Single Responsibility)
 - Reusable across different workflows
 - Easy to test independently
-- Can swap implementations (ML model vs LLM)
-
-How agents work:
-1. Agent receives input data (ticker, news, market data, etc.)
-2. Agent tries real ML model first (if available)
-3. If ML model fails/unavailable, falls back to LLM (GPT)
-4. Agent parses output into structured format
-5. Returns result to workflow
 """
 from __future__ import annotations
 
@@ -30,7 +21,7 @@ import re  # For pattern matching in text parsing
 from dataclasses import dataclass  # For creating simple data classes
 from typing import Dict, List, Literal, Optional, Any  # Type hints
 
-# LangChain: Framework for building AI applications
+# LangGraph runtime utilities (provided via langchain-core components)
 # Why: Provides tools to chain together prompts, LLMs, and parsers
 from langchain_core.output_parsers import StrOutputParser  # Converts LLM output to string
 from langchain_core.prompts import ChatPromptTemplate  # Creates formatted prompts for LLMs
@@ -92,151 +83,89 @@ class SmartMoneyResult:
 # ===== CORE AGENT CLASSES =====
 
 class PredictionAgent:
-    """Generates probabilistic directional forecasts for stock symbols.
-
-    What: Predicts whether a stock will go up, down, or stay neutral
-    Why: This is the core value proposition - helping users predict stock movements
-    How: Uses ML forecaster (gradient boosting) if available, falls back to LLM
+    """Generates probabilistic directional forecasts for stock symbols using the gradient boosting model.
 
     Data Flow:
     Input: ticker (str), market_data (price/volume), fundamentals (P/E, revenue, etc.)
     Output: PredictionResult (direction, confidence, narrative)
 
     Example:
-    Input: ticker="AAPL", market_data=[{close: 150, volume: 1000000}, ...], fundamentals={pe_ratio: 28}
-    Output: PredictionResult(direction="up", confidence=0.85, narrative="Strong momentum...")
+    Input: ticker="AAPL", market_data=[{close: 150, volume: 1_000_000}, ...], fundamentals={pe_ratio: 28}
+    Output: PredictionResult(direction="up", confidence=0.85, narrative="Gradient boosting model indicates...")
     """
 
     def __init__(
         self,
-        llm: Runnable,  # Language model (GPT or similar) for fallback
+        llm: Optional[Runnable] = None,  # Deprecated parameter retained for backwards compatibility
         *,
-        prompt: Optional[ChatPromptTemplate] = None,  # Custom prompt (optional)
-        use_ml_model: bool = True,  # Whether to try ML model first
+        use_ml_model: bool = True,  # Parameter retained for signature compatibility
     ) -> None:
-        """Initialize the prediction agent.
+        """Initialize the prediction agent in ML-only mode."""
+        if llm is not None:
+            logger.warning("PredictionAgent ignores provided LLM; operating in ML-only mode.")
 
-        What: Sets up the agent with ML model (if available) and LLM fallback
-        How: Tries to import forecaster module, creates prompt chain
-        Why: ML models are more accurate, but LLMs provide backup
-        """
-        self.use_ml_model = use_ml_model
+        if not use_ml_model:
+            logger.warning("PredictionAgent enforces ML-only mode; ignoring use_ml_model=False request.")
 
-        # Try to load the real ML forecaster (gradient boosting model)
-        if use_ml_model:
-            try:
-                # Import our custom forecaster module
-                from .models.forecaster import create_forecaster
-                # Create gradient boosting model instance
-                # This model uses technical indicators (RSI, MACD, etc.) to predict
-                self.forecaster = create_forecaster("gradient_boosting")
-            except ImportError:
-                # If forecaster module not available (missing dependencies, etc.)
-                logger.warning("ML forecaster not available, falling back to LLM-based prediction")
-                self.forecaster = None  # Mark as unavailable
-                self.use_ml_model = False  # Disable ML model flag
-        else:
-            self.forecaster = None
+        try:
+            from .models.forecaster import create_forecaster
+        except ImportError as exc:
+            raise RuntimeError(
+                "Probabilistic forecaster dependencies are missing. "
+                "Install the required model packages before running StockSense."
+            ) from exc
 
-        # Create the LLM prompt template
-        # This defines HOW we ask the LLM to make predictions
-        base_prompt = prompt or ChatPromptTemplate.from_template(
-            """You are an expert equity prediction specialist focused on probabilistic forecasting.
+        self.forecaster = create_forecaster("gradient_boosting")
+        if self.forecaster is None:
+            raise RuntimeError("create_forecaster returned None; ensure the forecaster is configured correctly.")
 
-Analyze the following data for {ticker} and provide a directional forecast:
+    def _build_narrative(self, ticker: str, ml_result) -> str:
+        """Compose a deterministic narrative summarising the ML output."""
+        probabilities = ml_result.model_metadata.get("probabilities", {}) if ml_result.model_metadata else {}
+        prob_up = probabilities.get("up", 0.0)
+        prob_down = probabilities.get("down", 0.0)
+        prob_neutral = probabilities.get("neutral", 0.0)
 
-Market Data: {market_data}
-Fundamentals: {fundamentals}
+        feature_importance = ml_result.feature_importance or {}
+        top_features = sorted(
+            feature_importance.items(),
+            key=lambda item: abs(item[1]),
+            reverse=True
+        )[:3]
+        feature_summary = ", ".join(f"{name} ({weight:.2f})" for name, weight in top_features) if top_features else "insufficient feature data"
 
-Provide your analysis in this exact format:
-DIRECTION: [up|down|neutral]
-CONFIDENCE: [0.0-1.0]
-NARRATIVE: [2-3 sentence explanation of your reasoning]
+        days = ml_result.horizon_95.get("days", 0) if ml_result.horizon_95 else 0
 
-Focus on:
-- Technical indicators and momentum
-- Fundamental strength/weakness
-- Market regime and volatility
-- Risk factors and catalysts
-
-Be conservative with confidence - only assign high confidence (>0.9) when multiple factors strongly align."""
+        return (
+            f"{ticker.upper()} forecast: {ml_result.direction.upper()} with "
+            f"{ml_result.confidence:.1%} confidence using the gradient boosting forecaster. "
+            f"Probability distribution - up: {prob_up:.1%}, down: {prob_down:.1%}, neutral: {prob_neutral:.1%}. "
+            f"95% confidence horizon: {days} day(s). "
+            f"Top contributing features: {feature_summary}."
         )
-
-        # Create the LLM chain
-        # What: Connects prompt → LLM → output parser
-        # How: Uses pipe (|) operator to chain components
-        # Result: When invoked, fills prompt, sends to LLM, parses response to string
-        self._chain = base_prompt | llm | StrOutputParser()
 
     def run(self, *, ticker: str, market_data: Dict, fundamentals: Dict[str, float]) -> PredictionResult:
-        """Make a prediction for a stock.
+        """Make a prediction for a stock using the gradient boosting forecaster."""
 
-        What: Main method that external code calls to get a prediction
-        How:
-        1. Try ML model first (if available)
-        2. If ML fails/unavailable, use LLM
-        3. Parse output into PredictionResult structure
-        4. Return structured result
+        if not isinstance(market_data, list):
+            raise ValueError("market_data must be a list of daily price records.")
 
-        Data Flow:
-        Receives: ticker (e.g., "AAPL"), market_data (price history), fundamentals (metrics)
-        Returns: PredictionResult with direction, confidence, narrative
+        try:
+            ml_result = self.forecaster.predict(market_data, fundamentals)
+        except Exception as exc:
+            raise RuntimeError(f"Gradient boosting forecaster failed for {ticker}: {exc}") from exc
 
-        Example:
-        Input: ticker="AAPL", market_data=[...60 days of prices...], fundamentals={pe_ratio: 28, ...}
-        Output: PredictionResult(direction="up", confidence=0.85, narrative="Technical indicators show...")
-        """
-
-        # === STRATEGY 1: Try ML Model First (More Accurate) ===
-        # Why: ML models trained on historical data are usually more accurate than LLMs
-        if self.use_ml_model and self.forecaster and isinstance(market_data, list):
-            try:
-                # Call the forecaster's predict method
-                # forecaster.predict analyzes technical indicators and returns forecast
-                ml_result = self.forecaster.predict(market_data, fundamentals)
-
-                # Convert ML model's output to our standard PredictionResult format
-                # Why: Ensures consistency regardless of which method we use
-                return PredictionResult(
-                    direction=ml_result.direction,  # "up", "down", or "neutral"
-                    confidence=ml_result.confidence,  # 0.0 to 1.0
-                    narrative=f"ML model prediction based on technical indicators and market patterns. "
-                             f"Confidence: {ml_result.confidence:.1%}. "  # :.1% formats as percentage
-                             f"95% horizon: {ml_result.horizon_95.get('days', 0)} days.",
-                    daily_probs=ml_result.daily_probs,
-                    horizon_95=ml_result.horizon_95,
-                    feature_importance=ml_result.feature_importance
-                )
-            except Exception as e:
-                # If ML prediction fails for any reason (bad data, model error, etc.)
-                logger.warning(f"ML prediction failed: {e}, falling back to LLM")
-                # Continue to LLM fallback below
-
-        # === STRATEGY 2: LLM Fallback (Always Available) ===
-        # Why: GPT can analyze data even if ML model unavailable
-        # How: Send formatted prompt to LLM, parse structured response
-
-        # Invoke the LLM chain with our data
-        # self._chain was created in __init__ as: prompt | llm | parser
-        raw_output = self._chain.invoke({
-            "ticker": ticker,  # Stock symbol
-            "market_data": str(market_data),  # Convert to string for LLM
-            "fundamentals": str(fundamentals)  # Convert to string for LLM
-        })
-
-        # Parse the LLM's response to extract structured data
-        # Why: LLMs return unstructured text, we need structured data
-        # Helper functions use regex to find "DIRECTION: up", "CONFIDENCE: 0.85", etc.
-        direction = _extract_direction(raw_output)  # Finds "DIRECTION: up" → returns "up"
-        confidence = _extract_confidence(raw_output, default=0.5)  # Finds "CONFIDENCE: 0.85" → returns 0.85
-        narrative = _extract_narrative(raw_output)  # Finds "NARRATIVE: ..." → returns explanation text
-
-        # Return structured result
         return PredictionResult(
-            direction=direction,
-            confidence=confidence,
-            narrative=narrative
+            direction=ml_result.direction,
+            confidence=ml_result.confidence,
+            narrative=self._build_narrative(ticker, ml_result),
+            daily_probs=ml_result.daily_probs,
+            horizon_95=ml_result.horizon_95,
+            feature_importance=ml_result.feature_importance
         )
+
+
+
 
 
 class SentimentAgent:
@@ -244,7 +173,7 @@ class SentimentAgent:
 
     What: Determines if news about a stock is positive, negative, or neutral
     Why: News sentiment often drives short-term price movements
-    How: Uses FinBERT (specialized financial sentiment AI) or LLM fallback
+    How: Uses FinBERT (specialized financial sentiment AI)
 
     Data Flow:
     Input: ticker (str), news_data (list of article dictionaries)
@@ -257,278 +186,91 @@ class SentimentAgent:
 
     def __init__(
         self,
-        llm: Runnable,  # Language model for fallback
+        llm: Optional[Runnable] = None,  # Deprecated parameter retained for compatibility
         *,
-        prompt: Optional[ChatPromptTemplate] = None,  # Custom prompt
-        use_finbert: bool = True,  # Whether to try FinBERT first
+        use_finbert: bool = True,
     ) -> None:
-        """Initialize the sentiment agent.
+        """Initialize the sentiment agent in FinBERT-only mode."""
+        if llm is not None:
+            logger.warning("SentimentAgent ignores provided LLM; operating with FinBERT only.")
 
-        What: Sets up FinBERT (if available) and LLM fallback
-        How: Tries to import FinBERT module, creates prompt chain
-        Why: FinBERT is specialized for financial text, more accurate than general LLMs
-        """
-        self.use_finbert = use_finbert
+        if not use_finbert:
+            logger.warning("SentimentAgent requires FinBERT; ignoring use_finbert=False request.")
 
-        # Try to load FinBERT (specialized financial sentiment model)
-        if use_finbert:
-            try:
-                # Import our FinBERT sentiment analyzer
-                from .sentiment.finbert import create_sentiment_analyzer
-                # Create analyzer instance (loads neural network model)
-                self.sentiment_analyzer = create_sentiment_analyzer()
-            except ImportError:
-                # If FinBERT not available (missing PyTorch, model not downloaded, etc.)
-                logger.warning("FinBERT not available, falling back to LLM-based sentiment")
-                self.sentiment_analyzer = None
-                self.use_finbert = False
-        else:
-            self.sentiment_analyzer = None
+        try:
+            from .sentiment.finbert import create_sentiment_analyzer
+        except ImportError as exc:
+            raise RuntimeError(
+                "FinBERT dependencies are missing. Install torch/transformers and download the model "
+                "before running StockSense."
+            ) from exc
 
-        # Create the LLM prompt template for sentiment analysis
-        # This is our fallback if FinBERT unavailable
-        base_prompt = prompt or ChatPromptTemplate.from_template(
-            """You are a financial sentiment analyst specializing in news and social media analysis.
-
-Analyze the sentiment for {ticker} based on the following news data:
-
-News Data: {news_data}
-
-Provide your analysis in this exact format:
-CURRENT: [positive|neutral|negative]
-SCORE: [0.0-1.0]
-TREND: [improving|stable|declining]
-HEADLINES: [3 most relevant headlines, one per line]
-
-Consider:
-- Earnings announcements and guidance
-- Product launches and partnerships
-- Regulatory news and legal issues
-- Analyst upgrades/downgrades
-- Market sentiment and social media buzz
-
-Be objective and focus on factual sentiment rather than speculation."""
-        )
-
-        # Create LLM chain: prompt → LLM → parser
-        self._chain = base_prompt | llm | StrOutputParser()
+        self.sentiment_analyzer = create_sentiment_analyzer()
+        if self.sentiment_analyzer is None:
+            raise RuntimeError("create_sentiment_analyzer returned None; ensure FinBERT assets are available.")
 
     def run(self, *, ticker: str, news_data: List[Dict]) -> SentimentResult:
-        """Analyze sentiment for a stock's news.
+        """Analyze sentiment for a stock's news using FinBERT."""
 
-        What: Processes news articles to determine overall sentiment
-        How:
-        1. Try FinBERT first (if available)
-        2. Fall back to LLM if FinBERT fails
-        3. Parse output into structured result
-        4. Return SentimentResult
+        if not news_data:
+            raise ValueError("news_data must contain at least one article for sentiment analysis.")
 
-        Data Flow:
-        Receives: ticker (e.g., "AAPL"), news_data (list of article dicts)
-        Returns: SentimentResult with sentiment classification
+        try:
+            finbert_result = self.sentiment_analyzer.process_news_articles(news_data)
+        except Exception as exc:
+            raise RuntimeError(f"FinBERT sentiment analysis failed for {ticker}: {exc}") from exc
 
-        Example:
-        Input: news_data=[
-            {title: "Apple beats earnings", content: "Strong iPhone sales..."},
-            {title: "Market volatility concerns", content: "Investors worried..."}
-        ]
-        Output: SentimentResult(current="positive", score=0.72, trend="improving", headlines=[...])
-        """
+        required_keys = {"current", "score", "trend", "headlines"}
+        if not isinstance(finbert_result, dict) or not required_keys.issubset(finbert_result.keys()):
+            raise RuntimeError("FinBERT returned an unexpected response structure.")
 
-        # === STRATEGY 1: Try FinBERT First (More Accurate for Finance) ===
-        # Why: FinBERT is trained specifically on financial news, understands context
-        if self.use_finbert and self.sentiment_analyzer and news_data:
-            try:
-                # Call FinBERT's process_news_articles method
-                # What it does: Runs each article through neural network, aggregates results
-                finbert_result = self.sentiment_analyzer.process_news_articles(news_data)
-
-                # Convert FinBERT's output to our standard SentimentResult format
-                # Why: Different implementations might have different output formats
-                return SentimentResult(
-                    current=finbert_result["current"],  # "positive", "negative", or "neutral"
-                    score=finbert_result["score"],  # 0.0 to 1.0 confidence
-                    trend=finbert_result["trend"],  # "improving", "stable", or "declining"
-                    headlines=finbert_result["headlines"]  # Top 3 headlines
-                )
-            except Exception as e:
-                # If FinBERT analysis fails (model error, bad data, etc.)
-                logger.warning(f"FinBERT analysis failed: {e}, falling back to LLM")
-                # Continue to LLM fallback below
-
-        # === STRATEGY 2: LLM Fallback ===
-        # Why: GPT can analyze sentiment even if FinBERT unavailable
-
-        # Invoke LLM chain with news data
-        raw_output = self._chain.invoke({
-            "ticker": ticker,
-            "news_data": str(news_data)  # Convert list to string for LLM
-        })
-
-        # Parse LLM response using helper functions
-        # These use regex to extract structured fields from text
-        current = _extract_sentiment_current(raw_output)  # Finds "CURRENT: positive"
-        score = _extract_confidence(raw_output, default=0.5)  # Finds "SCORE: 0.85"
-        trend = _extract_sentiment_trend(raw_output)  # Finds "TREND: improving"
-        headlines = _extract_headlines(raw_output)  # Extracts headline list
-
-        # Return structured result
         return SentimentResult(
-            current=current,
-            score=score,
-            trend=trend,
-            headlines=headlines
+            current=str(finbert_result["current"]).lower(),
+            score=float(finbert_result["score"]),
+            trend=str(finbert_result["trend"]).lower(),
+            headlines=list(finbert_result.get("headlines", []))[:3]
         )
 
 
 class SmartMoneyAgent:
-    """Tracks institutional, insider, and congressional trading activity.
-
-    What: Monitors what "smart money" (big investors) are doing with the stock
-    Why: Institutional investors often have better information than retail investors
-    How: Attempts to fetch real data from smart money service, falls back to LLM
-
-    Data Flow:
-    Input: ticker (str)
-    Output: SmartMoneyResult (institutions, insiders, congress data)
-
-    Example:
-    Input: ticker="AAPL"
-    Output: SmartMoneyResult(
-        institutions={summary: "Ownership increased 3% this quarter..."},
-        insiders={summary: "CEO purchased 10,000 shares..."},
-        congress={summary: "5 congressional trades disclosed..."}
-    )
-    """
+    """Tracks institutional, insider, and congressional activity via configured data services."""
 
     def __init__(
         self,
-        llm: Runnable,  # Language model for fallback
+        llm: Optional[Runnable] = None,  # Deprecated parameter retained for compatibility
         *,
-        prompt: Optional[ChatPromptTemplate] = None,  # Custom prompt
-        use_data_service: bool = True,  # Whether to try real data service
+        use_data_service: bool = True,
     ) -> None:
-        """Initialize the smart money agent.
+        if llm is not None:
+            logger.warning("SmartMoneyAgent ignores provided LLM; operating with data services only.")
 
-        What: Sets up smart money data service (if available) and LLM fallback
-        How: Tries to import smart money service with API keys
-        Why: Real data is more accurate than LLM-generated summaries
-        """
-        self.use_data_service = use_data_service
+        if not use_data_service:
+            raise ValueError("SmartMoneyAgent requires the data service to be enabled.")
 
-        # Try to load smart money data service
-        # This service fetches real data from SEC filings, insider trade databases, etc.
-        if use_data_service:
-            try:
-                from .smart_money import create_smart_money_service
+        try:
+            from .smart_money import create_smart_money_service
+        except ImportError as exc:
+            raise RuntimeError("Smart money service dependencies are missing. Install required packages before running StockSense.") from exc
 
-                # What: Gather whichever smart-money provider keys are currently configured
-                # Why: Prevent outbound calls to services we don't have credentials for
-                # How: Reuse the central API-key helper and keep only populated entries
-                # Data: Returns {"alpha_vantage": "...", "finnhub": "..."} when available
-                api_keys = get_available_api_keys("alpha_vantage", "finnhub")
-
-                # Create smart money service with available API keys
-                self.smart_money_service = create_smart_money_service(api_keys)
-            except ImportError:
-                # If smart money service module not available
-                logger.warning("Smart money service not available, falling back to LLM-based analysis")
-                self.smart_money_service = None
-                self.use_data_service = False
-        else:
-            self.smart_money_service = None
-
-        # Create LLM prompt template for smart money analysis
-        # This is fallback when real data unavailable
-        base_prompt = prompt or ChatPromptTemplate.from_template(
-            """You are a smart money analyst tracking institutional flows, insider trading, and congressional disclosures.
-
-Analyze smart money activity for {ticker}:
-
-Provide your analysis in this exact format:
-INSTITUTIONS: [ownership change, top buyers/sellers, summary]
-INSIDERS: [recent activity, net position, summary]
-CONGRESS: [recent trades, summary]
-
-Focus on:
-- Recent institutional ownership changes
-- Insider buying/selling patterns
-- Congressional trading disclosures
-- Notable hedge fund positions
-- Berkshire Hathaway or similar iconic investors
-
-If no recent data is available, indicate "No recent activity" for that category."""
-        )
-
-        # Create LLM chain
-        self._chain = base_prompt | llm | StrOutputParser()
+        api_keys = get_available_api_keys("alpha_vantage", "finnhub")
+        self.smart_money_service = create_smart_money_service(api_keys)
+        if self.smart_money_service is None:
+            raise RuntimeError("Smart money service could not be initialised; verify API keys and SEC data configuration.")
 
     def run(self, *, ticker: str) -> SmartMoneyResult:
-        """Analyze smart money activity for a stock.
+        """Analyze smart money activity for a stock using deterministic data sources."""
 
-        What: Fetches institutional, insider, and congressional trading data
-        How:
-        1. Try smart money service first (real data)
-        2. Fall back to LLM if service unavailable
-        3. Parse output into structured result
-        4. Return SmartMoneyResult
+        try:
+            institutional = self.smart_money_service.get_institutional_summary(ticker)
+            insider = self.smart_money_service.get_insider_summary(ticker)
+            congressional = self.smart_money_service.get_congressional_summary(ticker)
+        except Exception as exc:
+            raise RuntimeError(f"Smart money service failed for {ticker}: {exc}") from exc
 
-        Data Flow:
-        Receives: ticker (e.g., "AAPL")
-        Returns: SmartMoneyResult with three data categories
-
-        Example:
-        Input: ticker="AAPL"
-        Output: SmartMoneyResult with real SEC filing data (if available) or LLM analysis
-        """
-
-        # === STRATEGY 1: Try Real Data Service First ===
-        # Why: Real SEC filings and trade data are more accurate than LLM guesses
-        if self.use_data_service and self.smart_money_service:
-            try:
-                # Fetch real data from three sources:
-
-                # 1. Institutional ownership (13F filings from SEC)
-                # Shows what hedge funds, mutual funds own
-                institutional = self.smart_money_service.get_institutional_summary(ticker)
-
-                # 2. Insider trading (Form 4 filings from SEC)
-                # Shows what company executives are buying/selling
-                insider = self.smart_money_service.get_insider_summary(ticker)
-
-                # 3. Congressional trading (STOCK Act disclosures)
-                # Shows what members of Congress are trading
-                congressional = self.smart_money_service.get_congressional_summary(ticker)
-
-                # Return structured result with real data
-                return SmartMoneyResult(
-                    institutions=institutional,
-                    insiders=insider,
-                    congress=congressional
-                )
-            except Exception as e:
-                # If real data fetch fails (API error, rate limit, etc.)
-                logger.warning(f"Smart money service failed: {e}, falling back to LLM")
-                # Continue to LLM fallback below
-
-        # === STRATEGY 2: LLM Fallback ===
-        # Why: LLM can provide general analysis even without real data
-        # Note: This won't be as accurate as real data
-
-        # Invoke LLM chain
-        raw_output = self._chain.invoke({"ticker": ticker})
-
-        # Parse LLM response into three categories
-        # Helper function extracts each section from formatted text
-        institutions = _extract_smart_money_section(raw_output, "INSTITUTIONS")
-        insiders = _extract_smart_money_section(raw_output, "INSIDERS")
-        congress = _extract_smart_money_section(raw_output, "CONGRESS")
-
-        # Return structured result
         return SmartMoneyResult(
-            institutions=institutions,
-            insiders=insiders,
-            congress=congress
+            institutions=institutional,
+            insiders=insider,
+            congress=congressional
         )
 
 
@@ -637,11 +379,11 @@ Keep explanations concise but comprehensive - aim for 3-4 paragraphs."""
 # These create LLM instances for agents to use
 
 def build_openai_llm(model: str = "gpt-4o-mini") -> Runnable:
-    """Build OpenAI LLM using LangChain.
+    """Build OpenAI LLM using the LangGraph runtime.
 
     What: Creates connection to OpenAI's API
     Why: Agents need an LLM for text generation
-    How: Uses LangChain's ChatOpenAI wrapper
+    How: Uses the ChatOpenAI wrapper exposed through langchain-openai
 
     Data Flow:
     Input: model name (default "gpt-4o-mini" - cost-effective GPT-4 variant)
@@ -672,7 +414,7 @@ def build_real_llm_agent(tag: str, llm_model: Runnable) -> Runnable:
     """Utility to build a real LLM agent that processes actual prompts.
 
     What: Wraps an LLM model to handle different prompt formats
-    Why: LangChain prompts can have different formats, need unified handler
+    Why: LangGraph prompts can have different formats, need unified handler
     How: Creates a function that extracts content and invokes LLM
 
     Data Flow:
@@ -720,7 +462,7 @@ def build_real_llm_agent(tag: str, llm_model: Runnable) -> Runnable:
             return f"[{tag}] Processing error: {str(e)[:100]}..."  # Truncate to 100 chars
 
     # Wrap function in RunnableLambda to make it chainable
-    # Why: LangChain components need to be Runnable to work with pipes (|)
+    # Why: LangGraph components need to be Runnable to work with pipes (|)
     return RunnableLambda(_process)
 
 
@@ -1166,7 +908,7 @@ class SentimentAnalysisAgent:
         """Initialize sentiment analysis agent.
 
         What: Sets up FinBERT (if available) for multi-company sentiment
-        How: Attempts to load FinBERT, creates LLM fallback
+        How: Loads FinBERT assets and validates availability
         Why: FinBERT is specialized for financial sentiment
         """
         self.use_finbert = use_finbert

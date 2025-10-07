@@ -8,7 +8,7 @@ sentiment context, and smart-money signals.
 
 ## Core Capabilities
 
-- **Probabilistic forecasts** with calibrated 95 % confidence horizons.
+- **Probabilistic forecasts** with calibrated 95% confidence horizons.
 - **Sentiment intelligence** using FinBERT over live news streams.
 - **Smart money tracing** across institutional filings, insider trades, and
   congressional disclosures.
@@ -23,7 +23,7 @@ sentiment context, and smart-money signals.
 | ---------- | ------------------------------------------------ | --------------------------------------------- |
 | Frontend   | Next.js (App Router), TypeScript, Radix UI       | User experience, dashboards, client auth      |
 | API        | FastAPI, Pydantic, LangGraph workflow            | Request validation, agent orchestration       |
-| Agents     | LangChain/LangGraph powered prediction pipeline  | Forecasting, sentiment, explanation, alerts   |
+| Agents     | LangGraph-driven multi-agent prediction pipeline | Forecasting, sentiment, explanation, alerts   |
 | Data       | Adapter + repository pattern                     | Vendor integrations and durable storage       |
 | ML Assets  | Forecaster models and training utilities         | Time-series forecasting with risk metrics     |
 
@@ -70,9 +70,9 @@ API documentation.
 
 All project helpers live under `scripts/`:
 
-- `scripts/collect_training_data.py` — pulls historical prices, fundamentals,
+- `scripts/collect_training_data.py` - pulls historical prices, fundamentals,
   and directional labels into `data/training/` using real Yahoo Finance data.
-- `scripts/run_tests.py` — runs formatting, linting, type checks, and the pytest
+- `scripts/run_tests.py` - runs formatting, linting, type checks, and the pytest
   suite with coverage.
 
 Invoke them with `python scripts/<name>.py`.  They require a configured virtual
@@ -98,15 +98,15 @@ scope of testing changes.
 
 ```
 capstone/
-├── data/                 # Batch/realtime data lake staging areas
-├── docs/                 # Architecture, design notes, research artefacts
-├── frontend/             # Next.js client application
-├── model/                # Forecasting models and training utilities
-├── pipelines/            # FastAPI service, LangGraph workflow, data adapters
-├── scripts/              # Operational helpers (data collection, test runner)
-├── tests/                # Pytest suite (unit + integration)
-├── requirements.txt      # Backend dependencies
-└── pytest.ini            # Pytest configuration (paths, markers, coverage)
+|-- data/                 # Batch/realtime data lake staging areas
+|-- docs/                 # Architecture, design notes, research artefacts
+|-- frontend/             # Next.js client application
+|-- model/                # Forecasting models and training utilities
+|-- pipelines/            # FastAPI service, LangGraph workflow, data adapters
+|-- scripts/              # Operational helpers (data collection, test runner)
+|-- tests/                # Pytest suite (unit + integration)
+|-- requirements.txt      # Backend dependencies
+`-- pytest.ini            # Pytest configuration (paths, markers, coverage)
 ```
 
 ## Data Collection Workflow
@@ -122,7 +122,7 @@ batch pipelines or notebooks.
 
 ## Operational Notes
 
-- Keep virtual environments out of version control—` .venv311/` has been removed
+- Keep virtual environments out of version control; `.venv311/` has been removed
   and `.gitignore` prevents future accidental commits.
 - Environment variables should stay in `.env`; never commit secrets.
 - The LangGraph workflow relies on available API keys for premium providers; the
