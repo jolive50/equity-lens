@@ -43,7 +43,6 @@ from .agents import (  # AI agents that do specific tasks
     SentimentAgent,  # Analyzes news sentiment
     SmartMoneyAgent,  # Tracks institutional investors
     build_openai_llm,  # Creates OpenAI connection
-    build_mock_llm,  # Creates fake LLM for testing
 )
 from .repository import (  # Data storage classes
     JsonFileRepository,  # Reads/writes JSON files
@@ -272,17 +271,22 @@ def get_agents() -> Dict[str, any]:
     # If agents haven't been created yet, create them
     if _agents is None:
         # Try to use OpenAI's GPT model for better quality
-        # If no API key available, fall back to mock (for testing)
+        # If no API key is available, raise a configuration error so the caller knows to set it
         try:
             # build_openai_llm creates a connection to OpenAI's API
             # "gpt-4o-mini" is a cost-effective model (cheaper than full GPT-4)
             llm = build_openai_llm("gpt-4o-mini")
             logger.info("Using OpenAI GPT-4o-mini for agents")
         except ValueError as e:
-            # If OpenAI initialization fails (no API key, network error, etc.)
-            # Use a mock LLM that returns fake but realistic responses
-            logger.warning(f"OpenAI not available: {e}. Using mock LLM.")
-            llm = build_mock_llm("stocksense")
+            # What: Surface a clear operational error when no OpenAI key is configured.
+            # Why: The platform must not fabricate LLM outputs without a real model behind them.
+            # How: Log the issue and raise a RuntimeError so the API can respond with an actionable message.
+            # Data: Includes the original exception message for operator troubleshooting.
+            logger.error(f"OpenAI LLM unavailable: {e}")
+            raise RuntimeError(
+                "OPENAI_API_KEY is required to run StockSense analysis. "
+                "Set the environment variable before invoking the API."
+            ) from e
 
         # Create all agent instances with the LLM
         # Each agent has specialized prompts and logic for its task

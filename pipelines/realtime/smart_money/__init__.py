@@ -177,57 +177,38 @@ class FinnhubSmartMoneyAdapter(SmartMoneyDataAdapter):
 
 
 class CongressionalTradingAdapter:
-    """Adapter for congressional trading disclosures (using public APIs)."""
-    
-    def __init__(self):
+    # What: Handle congressional trading disclosures once a real data provider is wired up.
+    # Why: Keeps the service interface ready without returning fabricated trades.
+    # How: Store an optional base URL and raise an error until an integration is complete.
+    def __init__(self, *, data_source_url: Optional[str] = None):
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.data_source_url = data_source_url  # Data: URL string pointing at disclosure feed (or None).
     
     def get_congressional_trades(self, ticker: str) -> List[CongressionalTrade]:
-        """Get congressional trades from public disclosure APIs."""
-        # This would integrate with APIs like:
-        # - Capitol Trades API
-        # - Senate Stock Watcher
-        # - House Financial Disclosure API
-        
-        # For now, return mock data
-        trades = []
-        
-        # Mock congressional trades
-        mock_trades = [
-            {
-                "member_name": "Senator John Doe",
-                "chamber": "Senate",
-                "transaction_type": "buy",
-                "ticker": ticker,
-                "amount_range": "$1,001 - $15,000",
-                "transaction_date": "2024-01-15",
-                "filing_date": "2024-01-20",
-                "source": "senate_stock_watcher"
-            },
-            {
-                "member_name": "Representative Jane Smith",
-                "chamber": "House",
-                "transaction_type": "sell",
-                "ticker": ticker,
-                "amount_range": "$15,001 - $50,000",
-                "transaction_date": "2024-01-10",
-                "filing_date": "2024-01-18",
-                "source": "house_disclosures"
-            }
-        ]
-        
-        for trade_data in mock_trades:
-            trades.append(CongressionalTrade(**trade_data))
-        
-        return trades
-
-
+        # What: Prevent returning placeholders for congressional trades.
+        # Why: Real compliance-sensitive data must originate from official disclosures.
+        # How: Raise a RuntimeError that describes which data feeds to integrate.
+        # Data: Accepts the ticker symbol string; intentionally emits no trade records.
+        raise RuntimeError(
+            "Congressional trading data provider is not configured. "
+            "Integrate a disclosure feed such as Capitol Trades, Senate Stock Watcher, "
+            "or a licensed third-party dataset before requesting congressional activity."
+        )
 class SmartMoneyService:
     """Service that aggregates smart money data from multiple sources."""
     
-    def __init__(self, adapters: Dict[str, SmartMoneyDataAdapter]):
+    def __init__(
+        self,
+        adapters: Dict[str, SmartMoneyDataAdapter],
+        *,
+        congressional_adapter: Optional[CongressionalTradingAdapter] = None
+    ):
         self.adapters = adapters
-        self.congressional_adapter = CongressionalTradingAdapter()
+        # What: Hold a reference to the congressional disclosure adapter when one is provided.
+        # Why: Some deployments may not have licensed congressional data yet, so we treat it as optional.
+        # How: Store the object (or None) and let downstream methods respond accordingly.
+        # Data: Expects an instance of CongressionalTradingAdapter or None when not configured.
+        self.congressional_adapter = congressional_adapter
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def get_institutional_summary(self, ticker: str) -> Dict[str, Any]:
@@ -355,6 +336,20 @@ class SmartMoneyService:
     
     def get_congressional_summary(self, ticker: str) -> Dict[str, Any]:
         """Get congressional trading summary."""
+        if not self.congressional_adapter:
+            # What: Inform callers that congressional data is unavailable instead of fabricating output.
+            # Why: Keeps the application transparent about missing datasets (compliance requirement).
+            # How: Return a structured message with setup guidance rather than mock trades.
+            # Data: Provides zero trades and a summary string that frontends can display verbatim.
+            return {
+                "summary": (
+                    "Congressional trading analytics are unavailable because no disclosure data provider "
+                    "is configured. Integrate a feed such as Capitol Trades or Senate Stock Watcher."
+                ),
+                "total_trades": 0,
+                "recent_activity": []
+            }
+        
         try:
             trades = self.congressional_adapter.get_congressional_trades(ticker)
         except Exception as e:
@@ -419,34 +414,8 @@ def create_smart_money_service(api_keys: Dict[str, str]) -> SmartMoneyService:
     if "finnhub" in api_keys:
         adapters["finnhub"] = FinnhubSmartMoneyAdapter(api_keys["finnhub"])
     
-    return SmartMoneyService(adapters)
-
-
-if __name__ == "__main__":
-    # Test the smart money service
-    api_keys = {
-        "alpha_vantage": "TKL8YS43GMNA1BYD",
-        "finnhub": "d3a2f59r01qli8jccd0gd3a2f59r01qli8jccd10"
-    }
-    
-    service = create_smart_money_service(api_keys)
-    
-    # Test institutional summary
-    institutional = service.get_institutional_summary("AAPL")
-    print("Institutional Summary:")
-    print(f"Summary: {institutional['summary']}")
-    print(f"Total Institutions: {institutional['total_institutions']}")
-    print(f"Net Change: {institutional['net_change']:,} shares")
-    
-    # Test insider summary
-    insider = service.get_insider_summary("AAPL")
-    print("\nInsider Summary:")
-    print(f"Summary: {insider['summary']}")
-    print(f"Total Trades: {insider['total_trades']}")
-    print(f"Net Position: {insider['net_position']:,} shares")
-    
-    # Test congressional summary
-    congressional = service.get_congressional_summary("AAPL")
-    print("\nCongressional Summary:")
-    print(f"Summary: {congressional['summary']}")
-    print(f"Total Trades: {congressional['total_trades']}")
+    # What: Instantiate the service with whichever adapters are available right now.
+    # Why: Some deployments may only provide a subset of smart-money data sources.
+    # How: Pass the adapters dictionary and leave congressional data unplugged until a real feed is added.
+    # Data: `congressional_adapter` is None by default; integrate a real provider before enabling that feature.
+    return SmartMoneyService(adapters, congressional_adapter=None)

@@ -680,107 +680,59 @@ class ProbabilisticForecaster:
         )
 
     def _trend_based_prediction(self, market_data: List[Dict]) -> ForecastResult:
-        """Create prediction based on recent price trends.
-
-        What this does: Simple momentum-based prediction when ML model unavailable
-        Why: Better than random guessing while we build training data
-        How: Looks at recent price movement to determine likely direction
-
-        This is a fallback method - real predictions should use the trained ML model
-
-        Args:
-            market_data: List of daily market data
-
-        Returns:
-            ForecastResult with trend-based prediction
-        """
-        logger.info("Using trend-based prediction (fallback method)")
-
-        # Extract prices from market data
-        prices = [float(d.get('close', 0)) for d in market_data]
-
-        if len(prices) < 5:
-            # Not enough data, return neutral
+        """Create a probability forecast directly from observed price momentum."""
+        # What: Use recent momentum as a rule-based fallback when the ML model is unavailable.
+        # Why: Provides data-driven probabilities without fabricating arbitrary constants.
+        # How: Compute momentum from closing prices and map it to class probabilities via softmax.
+        # Data: Consumes a list of daily market-data dicts and emits a ForecastResult object.
+        prices = [float(d.get("close", 0)) for d in market_data if d.get("close") is not None]
+        if len(prices) < 10:
+            return self._default_prediction()  # Raises with guidance when history is insufficient.
+        recent_avg = float(np.mean(prices[-5:]))
+        older_window = prices[-10:-5] if len(prices) >= 10 else prices[:-5]
+        older_avg = float(np.mean(older_window)) if older_window else recent_avg
+        if older_avg == 0:
             return self._default_prediction()
-
-        # Calculate simple momentum: compare recent prices to older prices
-        recent_avg = np.mean(prices[-5:])   # Last 5 days
-        older_avg = np.mean(prices[-10:-5]) if len(prices) >= 10 else np.mean(prices[:-5])
-
-        # Determine direction based on trend
-        if recent_avg > older_avg * 1.02:  # 2% threshold
-            # Upward trend
-            direction = "up"
-            prob_up = 0.60    # 60% confidence
-            prob_down = 0.20
-            prob_neutral = 0.20
-        elif recent_avg < older_avg * 0.98:  # 2% threshold
-            # Downward trend
-            direction = "down"
-            prob_up = 0.20
-            prob_down = 0.60  # 60% confidence
-            prob_neutral = 0.20
-        else:
-            # Neutral/sideways
-            direction = "neutral"
-            prob_up = 0.30
-            prob_down = 0.30
-            prob_neutral = 0.40  # 40% confidence
-
-        # Generate daily probabilities
+        momentum = float((recent_avg - older_avg) / older_avg)
+        momentum = float(np.clip(momentum, -0.2, 0.2))  # Clamp extreme moves to keep probabilities stable.
+        scores = np.array([momentum, -momentum, 0.0], dtype=float)
+        temperature = 0.05  # Lower temperature -> sharper probabilities for stronger momentum.
+        scaled_scores = scores / temperature
+        exp_scores = np.exp(scaled_scores - np.max(scaled_scores))
+        base_probs = exp_scores / exp_scores.sum()
+        prob_up, prob_down, prob_neutral = [float(p) for p in base_probs]
+        direction_index = int(np.argmax(base_probs))
+        direction = ["up", "down", "neutral"][direction_index]
         daily_probs = self._generate_daily_probabilities(prob_up, prob_down, prob_neutral)
         horizon_95 = self._calculate_95_horizon(daily_probs)
-
+        feature_importance = {"momentum_strength": abs(momentum)}
+        confidence = max(prob_up, prob_down, prob_neutral)
         return ForecastResult(
             direction=direction,
-            confidence=max(prob_up, prob_down, prob_neutral),
+            confidence=confidence,
             daily_probs=daily_probs,
             horizon_95=horizon_95,
-            feature_importance={"trend_momentum": 1.0},  # Only factor used
+            feature_importance=feature_importance,
             model_metadata={
-                "model_type": "trend_based_fallback",
+                "model_type": self.model_type,
                 "probabilities": {
                     "up": prob_up,
                     "down": prob_down,
-                    "neutral": prob_neutral
-                }
+                    "neutral": prob_neutral,
+                },
+                "fallback": "momentum_softmax"
             }
         )
-
     def _default_prediction(self) -> ForecastResult:
-        """Return default neutral prediction when no data available.
-
-        What this does: Returns a safe "I don't know" prediction
-        Why: Better than crashing or returning garbage
-        How: Sets all probabilities to 33% (equal chance of each outcome)
-
-        Returns:
-            ForecastResult with neutral prediction
-        """
-        logger.warning("Returning default neutral prediction due to insufficient data")
-
-        base_date = datetime.utcnow()
-        daily_probs = []
-
-        # Create 30 days of neutral predictions
-        for i in range(1, 31):
-            date_str = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
-            daily_probs.append({
-                "date": date_str,
-                "up": 0.33,
-                "down": 0.33,
-                "neutral": 0.34
-            })
-
-        return ForecastResult(
-            direction="neutral",
-            confidence=0.34,
-            daily_probs=daily_probs,
-            horizon_95={"days": 0, "class": "neutral"},
-            feature_importance={},
-            model_metadata={"model_type": "default_neutral"}
+        """Raise an informative error instead of fabricating a neutral prediction."""
+        # What: Stop execution when we lack sufficient historical data for a real forecast.
+        # Why: Returning placeholder probabilities would mislead users and violate requirements.
+        # How: Raise a RuntimeError directing engineers to gather data and retrain the model.
+        # Data: Emits no ForecastResult because the inputs were inadequate.
+        raise RuntimeError(
+            "Insufficient market history to produce a forecast. "
+            "Collect additional daily price data and retrain the probabilistic forecaster."
         )
-
     def _generate_daily_probabilities(self, prob_up: float, prob_down: float, prob_neutral: float) -> List[Dict[str, Any]]:
         """Generate daily probability forecasts with confidence decay.
 

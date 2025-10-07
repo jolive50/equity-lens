@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Test script for the enhanced StockSense AI workflow.
 Demonstrates the coordinated multi-agent analysis with 95% confidence threshold.
@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'pipelines'))
 
 from pipelines.realtime.langgraph_workflow import run_enhanced_stocksense_analysis
 from pipelines.realtime.agents import (
-    build_mock_llm, CoordinationAgent, HistoricalAnalysisAgent,
+    build_openai_llm, CoordinationAgent, HistoricalAnalysisAgent,
     SentimentAnalysisAgent, PredictionAgent, ExplanationAgent,
     SmartMoneyAgent
 )
@@ -27,27 +27,29 @@ def main():
     print(f"📊 Analyzing {len(tickers)} S&P 500 companies: {', '.join(tickers)}")
     print()
     
-    # Create mock LLM for demo (no API keys required)
-    mock_llm = build_mock_llm("ai-demo")
-    
+    # Attempt to build a real OpenAI LLM connection for the demo
+    try:
+        llm = build_openai_llm("gpt-4o-mini")
+    except ValueError as exc:
+        print("OPENAI_API_KEY is required to run this demo:", exc)
+        return
     # Create AI agents with enhanced capabilities
-    print("🤖 Initializing AI Agents:")
-    print("  • Coordination Agent (synthesizes insights)")
-    print("  • Historical Agent (EBITDA, P/E, ROE analysis)")
-    print("  • Sentiment Agent (FinBERT-powered)")
-    print("  • Prediction Agent (ML probabilistic forecasting)")
-    print("  • Explanation Agent (plain English summaries)")
-    print("  • Smart Money Agent (institutions, insiders)")
+    print("Initializing AI Agents:")
+    print("  - Coordination Agent (synthesizes insights)")
+    print("  - Historical Agent (EBITDA, P/E, ROE analysis)")
+    print("  - Sentiment Agent (FinBERT-powered)")
+    print("  - Prediction Agent (ML probabilistic forecasting)")
+    print("  - Explanation Agent (plain English summaries)")
+    print("  - Smart Money Agent (institutions, insiders)")
     print()
-    
-    coordination_agent = CoordinationAgent(mock_llm, confidence_threshold=0.95)
-    historical_agent = HistoricalAnalysisAgent(mock_llm)
-    sentiment_agent = SentimentAnalysisAgent(mock_llm)
+    coordination_agent = CoordinationAgent(llm, confidence_threshold=0.95)
+    historical_agent = HistoricalAnalysisAgent(llm)
+    sentiment_agent = SentimentAnalysisAgent(llm)
     
     # Legacy agents for compatibility
-    prediction_agent = PredictionAgent(mock_llm)
-    explanation_agent = ExplanationAgent(mock_llm)
-    smart_money_agent = SmartMoneyAgent(mock_llm)
+    prediction_agent = PredictionAgent(llm)
+    explanation_agent = ExplanationAgent(llm)
+    smart_money_agent = SmartMoneyAgent(llm)
     
     try:
         print("🔄 Executing LangGraph Multi-Agent Workflow...")
@@ -174,3 +176,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
