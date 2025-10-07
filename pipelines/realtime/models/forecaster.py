@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 class ForecastResult:
     """Result from probabilistic forecasting model.
 
-    Think of this as a report card for our prediction. It contains:
+    Contains:
     - direction: Which way the stock is likely to move (up/down/neutral)
-    - confidence: How sure we are (0.0 = guessing, 1.0 = very sure)
+    - confidence: How sure we are (0.0 = guessing, 1.0 = certain)
     - daily_probs: Probability breakdown for each of the next 30 days
     - horizon_95: How many days we can maintain 95%+ confidence
     - feature_importance: Which factors influenced the prediction most

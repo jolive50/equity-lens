@@ -118,15 +118,15 @@ def get_sentiment(text: str) -> float:
 
     # WHAT: Tokenize input text and run inference
     # HOW: Use FinBERT tokenizer, pad to max_length, run forward pass
-    # DATA: text (str) -> input_ids (torch.Tensor) -> logits (3-class output)
-    inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+    # DATA: text (str) -> input_ids (tf.Tensor) -> logits (3-class output)
+    inputs = self.tokenizer(text, return_tensors="tf", padding=True, truncation=True)
     outputs = self.model(**inputs)
 
     # WHAT: Convert 3-class probabilities to continuous sentiment score
     # HOW: Apply softmax, compute weighted average: (positive - negative)
     # WHY: Continuous score more useful than discrete labels for downstream agents
     # DATA: logits [batch, 3] -> probs [positive, neutral, negative] -> score [-1, 1]
-    probs = torch.softmax(outputs.logits, dim=-1).detach().numpy()[0]
+    probs = tf.nn.softmax(outputs.logits, axis=-1).numpy()[0]
     sentiment_score = probs[2] - probs[0]  # bullish - bearish
 
     return float(sentiment_score)

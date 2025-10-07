@@ -201,7 +201,7 @@ class SentimentAgent:
             from .sentiment.finbert import create_sentiment_analyzer
         except ImportError as exc:
             raise RuntimeError(
-                "FinBERT dependencies are missing. Install torch/transformers and download the model "
+                "FinBERT dependencies are missing. Install tensorflow/transformers and download the model "
                 "before running StockSense."
             ) from exc
 
