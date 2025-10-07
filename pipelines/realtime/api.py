@@ -36,6 +36,7 @@ from fastapi.responses import StreamingResponse  # For streaming CSV files
 # Our custom modules - these are the core business logic
 from .data_adapters import DataAdapterFactory, DataService  # Fetches stock data
 from .langgraph_workflow import run_stocksense_analysis  # Main AI workflow
+from .api_keys import get_available_api_keys  # Centralised API-key registry
 from .agents import (  # AI agents that do specific tasks
     ExplanationAgent,  # Explains predictions in plain English
     PredictionAgent,  # Predicts stock direction
@@ -209,38 +210,40 @@ def get_data_service() -> DataService:
 
     # If service hasn't been created yet, create it
     if _data_service is None:
-        import os  # Re-import to ensure it's available
         adapters = {}  # Dictionary to store data source adapters
 
-        # Check which API keys are available and create adapters for them
-        # Why check environment: Not all users have all API keys
+        # What: Determine which upstream APIs we can actually call right now
+        # Why: Prevents accidental requests to services without credentials (avoids rate bans and errors)
+        # How: Ask the central API-key registry for the subset of keys that are available
+        # Data: Returns {service_name: api_key} pairs for configured providers
+        api_keys = get_available_api_keys("alpha_vantage", "tiingo", "finnhub", "newsapi")
 
         # Alpha Vantage: Stock prices and fundamentals
-        if os.getenv("ALPHA_VANTAGE_API_KEY"):
+        if "alpha_vantage" in api_keys:
             adapters["alpha_vantage"] = DataAdapterFactory.create_adapter(
-                "alpha_vantage",  # Adapter type
-                os.getenv("ALPHA_VANTAGE_API_KEY")  # API key from environment
+                "alpha_vantage",
+                api_keys["alpha_vantage"]
             )
 
         # Tiingo: Alternative stock data source
-        if os.getenv("TIINGO_API_KEY"):
+        if "tiingo" in api_keys:
             adapters["tiingo"] = DataAdapterFactory.create_adapter(
                 "tiingo",
-                os.getenv("TIINGO_API_KEY")
+                api_keys["tiingo"]
             )
 
         # Finnhub: Another stock data source
-        if os.getenv("FINNHUB_API_KEY"):
+        if "finnhub" in api_keys:
             adapters["finnhub"] = DataAdapterFactory.create_adapter(
                 "finnhub",
-                os.getenv("FINNHUB_API_KEY")
+                api_keys["finnhub"]
             )
 
         # NewsAPI: News articles source
-        if os.getenv("NEWSAPI_KEY"):
+        if "newsapi" in api_keys:
             adapters["newsapi"] = DataAdapterFactory.create_adapter(
                 "newsapi",
-                os.getenv("NEWSAPI_KEY")
+                api_keys["newsapi"]
             )
 
         # Create the DataService with all configured adapters

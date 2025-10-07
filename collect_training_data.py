@@ -48,6 +48,10 @@ def create_data_directories():
     for subdir in subdirs:
         path = base_dir / subdir
         path.mkdir(parents=True, exist_ok=True)
+        # What: Announce which folder path now exists on disk
+        # Why: Makes it obvious in the console that setup succeeded before downloads continue
+        # How: Log a simple human-readable string with the resolved path plugged in
+        # Data: Outputs the absolute training-data directory so teammates know where files land
         logger.info(f"✓ Created directory: {path}")
 
     return base_dir
@@ -66,16 +70,25 @@ def collect_historical_data(ticker: str, period: str = "2y") -> Dict:
 
     This uses yfinance to get REAL historical data, not fake data!
     """
+    # What: Log that we're about to hit Yahoo Finance for this ticker and period
+    # How: Format a status string that includes both the ticker and lookback window
+    # Why: Makes it easy to trace progress when collecting dozens of symbols
+    # Data: Outputs only plain-text identifiers—no credentials or sensitive payloads
     logger.info(f"📊 Fetching {period} of historical data for {ticker}...")
 
     try:
         import yfinance as yf
 
-        # Create a Ticker object - this connects to Yahoo Finance
+        # What: Create a helper object that knows how to request data for this ticker
+        # How: Instantiate yfinance.Ticker which wraps Yahoo Finance's HTTP calls
+        # Why: Avoids writing brittle request code and lets us reuse a tested SDK
+        # Data: Takes the ticker symbol we were given and later yields price/fundamental JSON
         stock = yf.Ticker(ticker)
 
-        # Get historical price data
-        # This returns a pandas DataFrame with OHLCV data
+        # What: Pull a table of historical prices that we can train on
+        # How: Call the `.history()` helper which returns a pandas DataFrame of OHLCV rows
+        # Why: The ML model needs a continuous price series to learn patterns
+        # Data: Each row contains open/high/low/close/volume columns indexed by date
         hist = stock.history(period=period)
 
         if hist.empty:

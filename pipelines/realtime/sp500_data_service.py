@@ -5,7 +5,6 @@ using dependency injection and interface segregation for maintainable, testable 
 """
 
 import logging
-import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -23,6 +22,8 @@ except ImportError:
         DataValidationService,
         FinancialDataProvider
     )
+
+from .api_keys import get_available_api_keys
 
 logger = logging.getLogger(__name__)
 
@@ -326,10 +327,13 @@ def get_sp500_data_service() -> SP500DataService:
     """Get or create global SP500DataService instance with default dependencies."""
     global _sp500_service
     if _sp500_service is None:
-        # Configure with environment-based settings
-        api_keys = {}
-        if os.getenv("ALPHA_VANTAGE_API_KEY"):
-            api_keys["alpha_vantage"] = os.getenv("ALPHA_VANTAGE_API_KEY")
+        # What: Capture any premium data-provider keys that are available for optional enrichment
+        # Why: Keeps the service aware of extra integrations without forcing every environment to provide them
+        # How: Reuse the central API key helper and log the result for observability
+        # Data: Returns {"alpha_vantage": "..."} when the key exists; empty dict otherwise
+        api_keys = get_available_api_keys("alpha_vantage")
+        if api_keys:
+            logger.info("Alpha Vantage key detected for SP500DataService optional features")
         
         # Create with dependency injection
         _sp500_service = SP500DataService(

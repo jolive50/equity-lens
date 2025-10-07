@@ -36,6 +36,8 @@ from langchain_core.output_parsers import StrOutputParser  # Converts LLM output
 from langchain_core.prompts import ChatPromptTemplate  # Creates formatted prompts for LLMs
 from langchain_core.runnables import Runnable, RunnableLambda  # Base classes for chainable components
 
+from .api_keys import get_api_key, get_available_api_keys  # Centralised API key helpers
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,11 +51,15 @@ class PredictionResult:
 
     What: Container for stock direction prediction
     Why: Ensures consistent format across workflow
-    Data: direction (up/down/neutral), confidence (0-1), explanation text
+    Data: direction (up/down/neutral), confidence (0-1), explanation text,
+          plus optional probability curve and horizon metadata when the ML model is available
     """
     direction: Literal["up", "down", "neutral"]  # Must be one of these three
     confidence: float  # 0.0 (not confident) to 1.0 (very confident)
     narrative: str  # English explanation of why prediction was made
+    daily_probs: Optional[List[Dict[str, Any]]] = None  # Full probability curve (if provided)
+    horizon_95: Optional[Dict[str, Any]] = None  # 95% confidence horizon metadata
+    feature_importance: Optional[Dict[str, float]] = None  # Optional model feature impact scores
 
 
 @dataclass
@@ -196,7 +202,10 @@ Be conservative with confidence - only assign high confidence (>0.9) when multip
                     confidence=ml_result.confidence,  # 0.0 to 1.0
                     narrative=f"ML model prediction based on technical indicators and market patterns. "
                              f"Confidence: {ml_result.confidence:.1%}. "  # :.1% formats as percentage
-                             f"95% horizon: {ml_result.horizon_95.get('days', 0)} days."
+                             f"95% horizon: {ml_result.horizon_95.get('days', 0)} days.",
+                    daily_probs=ml_result.daily_probs,
+                    horizon_95=ml_result.horizon_95,
+                    feature_importance=ml_result.feature_importance
                 )
             except Exception as e:
                 # If ML prediction fails for any reason (bad data, model error, etc.)
@@ -412,17 +421,12 @@ class SmartMoneyAgent:
         if use_data_service:
             try:
                 from .smart_money import create_smart_money_service
-                import os
 
-                # Collect API keys for data sources
-                # Why: Smart money data often requires paid API access
-                api_keys = {
-                    "alpha_vantage": os.getenv("ALPHA_VANTAGE_API_KEY"),
-                    "finnhub": os.getenv("FINNHUB_API_KEY")
-                }
-
-                # Filter out None values (only include keys that are set)
-                api_keys = {k: v for k, v in api_keys.items() if v}
+                # What: Gather whichever smart-money provider keys are currently configured
+                # Why: Prevent outbound calls to services we don't have credentials for
+                # How: Reuse the central API-key helper and keep only populated entries
+                # Data: Returns {"alpha_vantage": "...", "finnhub": "..."} when available
+                api_keys = get_available_api_keys("alpha_vantage", "finnhub")
 
                 # Create smart money service with available API keys
                 self.smart_money_service = create_smart_money_service(api_keys)
@@ -647,13 +651,12 @@ def build_openai_llm(model: str = "gpt-4o-mini") -> Runnable:
         ValueError: If OPENAI_API_KEY not set in environment
     """
     from langchain_openai import ChatOpenAI  # OpenAI integration
-    import os
 
-    # Get API key from environment variables
-    # Why environment: Don't hard-code secrets in code (security best practice)
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
+    # What: Pull the OpenAI API key from the central registry (raises if missing when required)
+    # Why: Guarantees we never attempt to hit OpenAI without credentials, keeping usage compliant
+    # How: Delegate to api_keys.get_api_key with required=True so a clear exception is raised when absent
+    # Data: Returns the API key string trimmed of whitespace
+    api_key = get_api_key("openai", required=True)
 
     # Create and return ChatOpenAI instance
     return ChatOpenAI(
