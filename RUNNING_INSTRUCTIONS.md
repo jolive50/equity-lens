@@ -460,7 +460,9 @@ StockSense/
 ├── .env.example                  # Template for API keys
 ├── requirements.txt              # Python dependencies
 ├── test_data_fetch.py           # Test script
-├── collect_training_data.py     # Data collection
+├── scripts/
+│   ├── collect_training_data.py # Data collection entry point
+│   └── run_tests.py             # Quality gate helper
 ├── SETUP.md                     # Detailed setup guide
 ├── RUNNING_INSTRUCTIONS.md      # This file
 │
@@ -493,7 +495,7 @@ StockSense/
 ### 1. Collect Training Data
 
 ```bash
-python collect_training_data.py
+python scripts/collect_training_data.py
 ```
 
 This collects 2 years of historical data for training ML models.
@@ -547,7 +549,7 @@ cd frontend && npm run dev
 python test_data_fetch.py
 
 # Collect training data
-python collect_training_data.py
+python scripts/collect_training_data.py
 
 # Install dependencies
 pip install -r requirements.txt
