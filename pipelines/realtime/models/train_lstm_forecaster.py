@@ -36,6 +36,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import classification_report, confusion_matrix, log_loss
 
+# Import ProbabilityCalibrator from forecaster module
+from pipelines.realtime.models.forecaster import ProbabilityCalibrator, TrainingConfig
+
 # Set random seeds for reproducibility
 np.random.seed(42)
 tf.random.set_seed(42)
@@ -43,40 +46,6 @@ tf.random.set_seed(42)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class TrainingConfig:
-    """Configuration for LSTM training process.
-
-    WHAT: Centralized settings for model architecture and training
-    WHY: Makes hyperparameters easy to adjust without code changes
-    DATA: All training parameters in one place
-    """
-    # Data paths
-    data_dir: str = "data/training/raw/kaggle_sp500/individual_stocks_5yr/individual_stocks_5yr"
-    model_save_dir: str = "pipelines/realtime/models/saved_models"
-
-    # Model architecture
-    sequence_length: int = 30  # Days of history to use for prediction
-    lstm_layer1_units: int = 128  # First LSTM layer size
-    lstm_layer2_units: int = 64   # Second LSTM layer size
-    dropout_rate: float = 0.2     # Dropout for regularization
-
-    # Training parameters
-    batch_size: int = 64
-    epochs: int = 50
-    validation_split: float = 0.2  # 20% for validation
-    calibration_split: float = 0.1  # 10% for calibration (from train set)
-    learning_rate: float = 0.001
-
-    # Class labels
-    num_classes: int = 3  # up, down, steady
-    price_change_threshold: float = 0.02  # ±2% for up/down classification (if not using ATR)
-
-    # ATR-based dynamic thresholding
-    use_atr_threshold: bool = True  # Use ATR-based threshold instead of fixed percentage
-    atr_window: int = 14  # ATR calculation window (standard is 14 days)
-    atr_multiplier: float = 0.3  # Threshold = ATR * multiplier (0.3 gives best balance)
 
 
 class LSTMDataProcessor:
@@ -739,106 +708,6 @@ class LSTMForecasterModel:
         }
 
 
-class ProbabilityCalibrator:
-    """Calibrates model probabilities to match true frequencies.
-
-    WHAT: Ensures predicted probabilities are well-calibrated
-    WHY: Want 70% confidence to mean 70% actual accuracy
-    HOW: Uses isotonic regression on calibration set
-    DATA: Raw probabilities -> calibrated probabilities
-    """
-
-    def __init__(self):
-        """Initialize calibrator.
-
-        WHAT: Set up calibration storage
-        WHY: Will store calibration curves
-        """
-        self.calibration_maps = {}
-
-    def fit(self, y_true: np.ndarray, y_proba: np.ndarray,
-            class_idx: int) -> None:
-        """Fit calibration map for a specific class.
-
-        WHAT: Learn mapping from predicted to calibrated probabilities
-        WHY: Model probabilities often poorly calibrated out-of-box
-        HOW: Use calibration curve to map predicted -> true frequency
-        DATA: True labels + predictions -> calibration mapping
-
-        Args:
-            y_true: True labels
-            y_proba: Predicted probabilities for class
-            class_idx: Which class (0=down, 1=steady, 2=up)
-        """
-        # WHAT: Create binary labels for this class
-        # WHY: Calibration curve needs binary (class vs not-class)
-        # DATA: Multi-class labels -> binary labels
-        y_binary = (y_true == class_idx).astype(int)
-
-        # WHAT: Calculate calibration curve
-        # WHY: Shows how predicted probabilities relate to true frequencies
-        # HOW: Bin predictions, calculate actual frequency in each bin
-        # DATA: Predictions -> (true_freq, pred_mean) pairs
-        fraction_of_positives, mean_predicted_value = calibration_curve(
-            y_binary, y_proba, n_bins=10, strategy='quantile'
-        )
-
-        # WHAT: Store calibration mapping
-        # WHY: Use for transforming future predictions
-        # DATA: Arrays of (predicted, actual) points
-        self.calibration_maps[class_idx] = {
-            'true_freq': fraction_of_positives,
-            'pred_mean': mean_predicted_value
-        }
-
-        logger.info(f"Calibration for class {class_idx}:")
-        logger.info(f"  Predicted: {mean_predicted_value}")
-        logger.info(f"  Actual: {fraction_of_positives}")
-
-    def calibrate(self, proba: np.ndarray) -> np.ndarray:
-        """Apply calibration to probabilities.
-
-        WHAT: Transform predicted probabilities using calibration maps
-        WHY: Get better-calibrated confidence estimates
-        HOW: Interpolate using calibration curves
-        DATA: Raw probabilities -> calibrated probabilities
-
-        Args:
-            proba: Raw predicted probabilities (n_samples, n_classes)
-
-        Returns:
-            Calibrated probabilities (n_samples, n_classes)
-        """
-        calibrated = np.zeros_like(proba)
-
-        for class_idx in range(proba.shape[1]):
-            if class_idx not in self.calibration_maps:
-                # WHAT: If no calibration available, use raw probabilities
-                # WHY: Better than failing completely
-                calibrated[:, class_idx] = proba[:, class_idx]
-                continue
-
-            # WHAT: Get calibration map for this class
-            cal_map = self.calibration_maps[class_idx]
-
-            # WHAT: Interpolate predicted probabilities to calibrated values
-            # WHY: Map predicted -> actual frequency
-            # HOW: Linear interpolation between calibration points
-            calibrated[:, class_idx] = np.interp(
-                proba[:, class_idx],
-                cal_map['pred_mean'],
-                cal_map['true_freq']
-            )
-
-        # WHAT: Renormalize to ensure probabilities sum to 1
-        # WHY: Calibration may break probability axiom
-        # HOW: Divide each by row sum
-        row_sums = calibrated.sum(axis=1, keepdims=True)
-        calibrated = calibrated / row_sums
-
-        return calibrated
-
-
 def main():
     """Main training pipeline.
 
@@ -992,6 +861,20 @@ def main():
     with open(config_path, 'wb') as f:
         pickle.dump(config, f)
     logger.info(f"Saved config to {config_path}")
+
+    # WHAT: Save background data for SHAP explainer
+    # WHY: SHAP needs representative samples to calculate feature importance
+    # HOW: Sample 100 random sequences from training set as baseline
+    # DATA: Random subset of training sequences -> background samples
+    background_size = min(100, len(X_train_norm))
+    background_indices = np.random.choice(len(X_train_norm), background_size, replace=False)
+    shap_background = X_train_norm[background_indices]
+
+    background_path = save_dir / "shap_background.pkl"
+    with open(background_path, 'wb') as f:
+        pickle.dump(shap_background, f)
+    logger.info(f"Saved SHAP background data to {background_path}")
+    logger.info(f"  Background samples: {background_size}")
 
     logger.info("\n" + "=" * 50)
     logger.info("Training complete!")

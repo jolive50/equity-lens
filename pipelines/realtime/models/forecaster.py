@@ -24,6 +24,9 @@ from dataclasses import dataclass
 import tensorflow as tf
 from tensorflow import keras
 
+# SHAP for model explainability
+import shap
+
 # Scikit-learn: Popular Python library for machine learning
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
@@ -33,6 +36,143 @@ import warnings
 warnings.filterwarnings('ignore')  # Suppress unnecessary warnings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TrainingConfig:
+    """Configuration for LSTM training process.
+
+    WHAT: Centralized settings for model architecture and training
+    WHY: Makes hyperparameters easy to adjust without code changes
+    DATA: All training parameters in one place
+    """
+    # Data paths
+    data_dir: str = "data/training/raw/kaggle_sp500/individual_stocks_5yr/individual_stocks_5yr"
+    model_save_dir: str = "pipelines/realtime/models/saved_models"
+
+    # Model architecture
+    sequence_length: int = 30  # Days of history to use for prediction
+    lstm_layer1_units: int = 128  # First LSTM layer size
+    lstm_layer2_units: int = 64   # Second LSTM layer size
+    dropout_rate: float = 0.2     # Dropout for regularization
+
+    # Training parameters
+    batch_size: int = 64
+    epochs: int = 50
+    validation_split: float = 0.2  # 20% for validation
+    calibration_split: float = 0.1  # 10% for calibration (from train set)
+    learning_rate: float = 0.001
+
+    # Class labels
+    num_classes: int = 3  # up, down, steady
+    price_change_threshold: float = 0.02  # ±2% for up/down classification (if not using ATR)
+
+    # ATR-based dynamic thresholding
+    use_atr_threshold: bool = True  # Use ATR-based threshold instead of fixed percentage
+    atr_window: int = 14  # ATR calculation window (standard is 14 days)
+    atr_multiplier: float = 0.3  # Threshold = ATR * multiplier (0.3 gives best balance)
+
+
+class ProbabilityCalibrator:
+    """Calibrates model probabilities to match true frequencies.
+
+    WHAT: Ensures predicted probabilities are well-calibrated
+    WHY: Want 70% confidence to mean 70% actual accuracy
+    HOW: Uses isotonic regression on calibration set
+    DATA: Raw probabilities -> calibrated probabilities
+    """
+
+    def __init__(self):
+        """Initialize calibrator.
+
+        WHAT: Set up calibration storage
+        WHY: Will store calibration curves
+        """
+        self.calibration_maps = {}
+
+    def fit(self, y_true: np.ndarray, y_proba: np.ndarray,
+            class_idx: int) -> None:
+        """Fit calibration map for a specific class.
+
+        WHAT: Learn mapping from predicted to calibrated probabilities
+        WHY: Model probabilities often poorly calibrated out-of-box
+        HOW: Use calibration curve to map predicted -> true frequency
+        DATA: True labels + predictions -> calibration mapping
+
+        Args:
+            y_true: True labels
+            y_proba: Predicted probabilities for class
+            class_idx: Which class (0=down, 1=steady, 2=up)
+        """
+        from sklearn.calibration import calibration_curve
+
+        # WHAT: Create binary labels for this class
+        # WHY: Calibration curve needs binary (class vs not-class)
+        # DATA: Multi-class labels -> binary labels
+        y_binary = (y_true == class_idx).astype(int)
+
+        # WHAT: Calculate calibration curve
+        # WHY: Shows how predicted probabilities relate to true frequencies
+        # HOW: Bin predictions, calculate actual frequency in each bin
+        # DATA: Predictions -> (true_freq, pred_mean) pairs
+        fraction_of_positives, mean_predicted_value = calibration_curve(
+            y_binary, y_proba, n_bins=10, strategy='quantile'
+        )
+
+        # WHAT: Store calibration mapping
+        # WHY: Use for transforming future predictions
+        # DATA: Arrays of (predicted, actual) points
+        self.calibration_maps[class_idx] = {
+            'true_freq': fraction_of_positives,
+            'pred_mean': mean_predicted_value
+        }
+
+        logger.info(f"Calibration for class {class_idx}:")
+        logger.info(f"  Predicted: {mean_predicted_value}")
+        logger.info(f"  Actual: {fraction_of_positives}")
+
+    def calibrate(self, proba: np.ndarray) -> np.ndarray:
+        """Apply calibration to probabilities.
+
+        WHAT: Transform predicted probabilities using calibration maps
+        WHY: Get better-calibrated confidence estimates
+        HOW: Interpolate using calibration curves
+        DATA: Raw probabilities -> calibrated probabilities
+
+        Args:
+            proba: Raw predicted probabilities (n_samples, n_classes)
+
+        Returns:
+            Calibrated probabilities (n_samples, n_classes)
+        """
+        calibrated = np.zeros_like(proba)
+
+        for class_idx in range(proba.shape[1]):
+            if class_idx not in self.calibration_maps:
+                # WHAT: If no calibration available, use raw probabilities
+                # WHY: Better than failing completely
+                calibrated[:, class_idx] = proba[:, class_idx]
+                continue
+
+            # WHAT: Get calibration map for this class
+            cal_map = self.calibration_maps[class_idx]
+
+            # WHAT: Interpolate predicted probabilities to calibrated values
+            # WHY: Map predicted -> actual frequency
+            # HOW: Linear interpolation between calibration points
+            calibrated[:, class_idx] = np.interp(
+                proba[:, class_idx],
+                cal_map['pred_mean'],
+                cal_map['true_freq']
+            )
+
+        # WHAT: Renormalize to ensure probabilities sum to 1
+        # WHY: Calibration may break probability axiom
+        # HOW: Divide each by row sum
+        row_sums = calibrated.sum(axis=1, keepdims=True)
+        calibrated = calibrated / row_sums
+
+        return calibrated
 
 
 @dataclass
@@ -573,6 +713,7 @@ class ProbabilisticForecaster:
         self.model = None
         self.feature_engineer = FeatureEngineer()  # Creates features from data
         self.is_trained = False  # Track whether model has been trained
+        self.shap_explainer = None  # SHAP explainer for feature importance
 
         # WHAT: Set default model directory if not provided
         # WHY: Centralized location for saved models
@@ -697,6 +838,12 @@ class ProbabilisticForecaster:
         logger.info("LSTM model loaded successfully")
         logger.info(f"Sequence length: {self.lstm_config.sequence_length}")
         logger.info(f"Features: {self.lstm_feature_columns}")
+
+        # WHAT: Initialize SHAP explainer for feature importance
+        # WHY: Provide interpretable explanations of model predictions
+        # HOW: Use DeepExplainer with background data from training
+        # DATA: Model + background samples -> SHAP explainer
+        self._initialize_shap_explainer()
 
     def predict(self, market_data: List[Dict], fundamentals: Dict[str, float]) -> ForecastResult:
         """Make probabilistic forecast for a stock.
@@ -848,10 +995,11 @@ class ProbabilisticForecaster:
         # WHY: Show how long prediction remains highly confident
         horizon_95 = self._calculate_95_horizon(daily_probs)
 
-        # WHAT: Feature importance placeholder for LSTM
-        # WHY: LSTM feature importance harder to extract than tree models
-        # TODO: Implement SHAP or attention-based importance
-        feature_importance = {"lstm_attention": 1.0}
+        # WHAT: Calculate SHAP feature importance
+        # WHY: Explain which features drove this prediction
+        # HOW: Use SHAP explainer on normalized sequence
+        # DATA: Normalized sequence -> feature importance dict
+        feature_importance = self._calculate_shap_importance(sequence_norm)
 
         return ForecastResult(
             direction=direction,
@@ -869,6 +1017,122 @@ class ProbabilisticForecaster:
                 "calibrated": True
             }
         )
+
+    def _initialize_shap_explainer(self) -> None:
+        """Initialize SHAP explainer for LSTM model.
+
+        WHAT: Creates SHAP explainer for feature importance calculation
+        WHY: SHAP provides mathematically rigorous feature attributions
+        HOW: Load background data and create DeepExplainer
+        DATA: Background samples -> SHAP explainer object
+        """
+        try:
+            # WHAT: Check if background data file exists
+            # WHY: Need representative samples for SHAP baseline
+            background_path = self.model_dir / "shap_background.pkl"
+
+            if not background_path.exists():
+                logger.warning("SHAP background data not found, SHAP explainer disabled")
+                logger.warning(f"Expected file: {background_path}")
+                return
+
+            # WHAT: Load background data
+            # WHY: SHAP needs baseline samples to calculate importance
+            # HOW: Pickle deserialization
+            # DATA: .pkl file -> numpy array of background sequences
+            with open(background_path, 'rb') as f:
+                background_data = pickle.load(f)
+
+            # WHAT: Create SHAP DeepExplainer
+            # WHY: DeepExplainer optimized for neural networks
+            # HOW: Provide model and background data to SHAP
+            # DATA: Model + background -> explainer object
+            logger.info("Initializing SHAP DeepExplainer...")
+            self.shap_explainer = shap.DeepExplainer(
+                self.lstm_model,
+                background_data
+            )
+            logger.info("SHAP explainer initialized successfully")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize SHAP explainer: {e}")
+            logger.warning("Feature importance will use placeholder values")
+
+    def _calculate_shap_importance(self, sequence: np.ndarray) -> Dict[str, float]:
+        """Calculate SHAP feature importance for prediction.
+
+        WHAT: Computes feature importance using SHAP values
+        WHY: Shows which features most influenced the prediction
+        HOW: Run SHAP explainer on input sequence, aggregate by feature
+        DATA: Input sequence -> SHAP values -> importance dict
+
+        Args:
+            sequence: Normalized input sequence (1, seq_len, n_features)
+
+        Returns:
+            Dictionary mapping feature names to importance scores
+            Example: {"rsi": 0.25, "macd": 0.18, "volume_ratio": 0.15, ...}
+        """
+        # WHAT: Check if SHAP explainer available
+        # WHY: Fall back to placeholder if explainer not initialized
+        if self.shap_explainer is None:
+            logger.debug("SHAP explainer not available, using placeholder")
+            return {"lstm_prediction": 1.0}
+
+        try:
+            # WHAT: Calculate SHAP values for input
+            # WHY: Get feature attributions for this specific prediction
+            # HOW: Pass sequence through SHAP explainer
+            # DATA: Input sequence -> SHAP values (1, seq_len, n_features)
+            shap_values = self.shap_explainer.shap_values(sequence)
+
+            # WHAT: Aggregate SHAP values across time steps
+            # WHY: Get overall feature importance (not per timestep)
+            # HOW: Take absolute values and average over sequence length
+            # DATA: (1, seq_len, n_features) -> (n_features,)
+
+            # SHAP values come as list of arrays (one per class)
+            # We take the predicted class's SHAP values
+            if isinstance(shap_values, list):
+                # WHAT: Get predicted class index
+                # WHY: Use SHAP values for the actual prediction
+                predicted_class = np.argmax(self.lstm_model.predict(sequence, verbose=0))
+                class_shap_values = shap_values[predicted_class]
+            else:
+                class_shap_values = shap_values
+
+            # WHAT: Aggregate SHAP values for each feature
+            # HOW: Take mean absolute value across sequence length
+            # DATA: (1, seq_len, n_features) -> (n_features,)
+            feature_importance_array = np.mean(np.abs(class_shap_values[0]), axis=0)
+
+            # WHAT: Normalize importance scores to sum to 1
+            # WHY: Make importance interpretable as percentages
+            # HOW: Divide by sum of all importances
+            total_importance = np.sum(feature_importance_array)
+            if total_importance > 0:
+                feature_importance_array = feature_importance_array / total_importance
+
+            # WHAT: Create dictionary mapping feature names to scores
+            # WHY: Return human-readable feature importance
+            # DATA: Array -> dict with feature names
+            feature_importance = {}
+            for idx, feature_name in enumerate(self.lstm_feature_columns):
+                feature_importance[feature_name] = float(feature_importance_array[idx])
+
+            # WHAT: Sort by importance and keep top 10
+            # WHY: Focus on most influential features
+            # HOW: Sort dict by values descending
+            sorted_importance = dict(
+                sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:10]
+            )
+
+            return sorted_importance
+
+        except Exception as e:
+            logger.warning(f"SHAP calculation failed: {e}")
+            logger.debug("Using placeholder feature importance")
+            return {"lstm_prediction": 1.0}
 
     def _calculate_rsi_series(self, prices: pd.Series, window: int = 14) -> pd.Series:
         """Calculate RSI for pandas Series.
