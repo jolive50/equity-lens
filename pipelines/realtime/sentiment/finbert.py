@@ -16,13 +16,13 @@ import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
-# PyTorch: Deep learning framework (like TensorFlow)
-# Why: FinBERT is a neural network that needs PyTorch to run
-import torch
+# TensorFlow: Deep learning framework for neural networks
+# Why: FinBERT is a neural network that needs TensorFlow to run
+import tensorflow as tf
 
 # Transformers: Hugging Face library for pre-trained AI models
-# Why: Provides easy access to FinBERT and handles tokenization
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# Why: Provides easy access to FinBERT and handles tokenization (with TensorFlow backend)
+from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 
 import numpy as np
 
@@ -57,16 +57,30 @@ class FinBERTSentimentAnalyzer:
         """
         self.model_name = model_name
 
-        # Determine device to run model on
-        # GPU (CUDA) is much faster but not always available
-        # CPU works everywhere but slower
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # WHAT: Detect available hardware acceleration (GPU if available, otherwise CPU)
+        # WHY: GPUs significantly speed up inference but aren't always available
+        # HOW: TensorFlow automatically detects and uses GPUs when available
+        # DATA: Returns list of physical GPU devices
+        gpus = tf.config.list_physical_devices('GPU')
+        self.device = "GPU" if gpus else "CPU"
+
+        # WHAT: Enable memory growth for GPUs to avoid allocating all GPU memory at once
+        # WHY: Allows multiple models or processes to share GPU memory
+        # HOW: Configure TensorFlow to allocate GPU memory as needed
+        if gpus:
+            try:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError as e:
+                logger.warning(f"GPU memory growth setting failed: {e}")
 
         try:
+            # WHAT: Load tokenizer and TensorFlow-based FinBERT model
+            # WHY: Need both to convert text → tokens → predictions
+            # HOW: HuggingFace transformers provides TF models via TFAutoModel classes
+            # DATA: Downloads model files if not cached, loads into memory
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
-            self.model.to(self.device)
-            self.model.eval()
+            self.model = TFAutoModelForSequenceClassification.from_pretrained(model_name)
             logger.info(f"FinBERT model loaded successfully on {self.device}")
         except Exception as e:
             raise RuntimeError(f"Failed to load FinBERT model: {e}") from e
@@ -95,40 +109,42 @@ class FinBERTSentimentAnalyzer:
             raise RuntimeError("FinBERT model is not available; ensure it is downloaded before running analysis.")
 
         try:
-            # Tokenize the input text
-            # What this does: Converts text to input IDs, attention masks, etc.
-            # Why these parameters:
-            # - return_tensors="pt": Return PyTorch tensors (not NumPy or lists)
+            # WHAT: Tokenize the input text into numerical format for the model
+            # WHY: Neural networks need numerical inputs, not raw text
+            # HOW: Tokenizer converts text → token IDs, attention masks, etc.
+            # DATA: Text string → dictionary with input_ids, attention_mask tensors
+            # Parameters explained:
+            # - return_tensors="tf": Return TensorFlow tensors (not NumPy or lists)
             # - truncation=True: Cut off text longer than max_length
             # - padding=True: Pad shorter texts to uniform length
-            # - max_length=512: FinBERT can handle up to 512 tokens
+            # - max_length=512: FinBERT (BERT-based) can handle up to 512 tokens
             inputs = self.tokenizer(
                 text,
-                return_tensors="pt",  # "pt" = PyTorch
+                return_tensors="tf",  # "tf" = TensorFlow
                 truncation=True,
                 padding=True,
                 max_length=512  # BERT models have 512 token limit
-            ).to(self.device)  # Move to GPU if available
+            )
 
-            # Get model predictions
-            # torch.no_grad(): Disable gradient calculation (we're not training)
-            # Why: Saves memory and speeds up inference
-            with torch.no_grad():
-                # Forward pass through the neural network
-                # inputs contains: input_ids, attention_mask, token_type_ids
-                outputs = self.model(**inputs)
+            # WHAT: Run forward pass through the neural network
+            # WHY: Get raw predictions (logits) from the model
+            # HOW: Pass tokenized inputs through FinBERT layers
+            # DATA: inputs (tensors) → outputs.logits (raw scores for each class)
+            # Note: TensorFlow models don't need torch.no_grad() - they're in inference mode by default
+            outputs = self.model(**inputs)
 
-                # outputs.logits: Raw scores from final layer (can be any number)
-                # Example: [-2.1, 3.5, 0.2]
-                # softmax: Converts to probabilities (0-1, sum to 1)
-                # Example: [0.01, 0.94, 0.05] → 94% positive
-                probabilities = torch.softmax(outputs.logits, dim=-1)
+            # WHAT: Convert raw logits to probabilities using softmax
+            # WHY: Logits are unbounded scores; softmax normalizes to [0,1] summing to 1
+            # HOW: Apply softmax activation along the class dimension (axis=-1)
+            # DATA: logits [-2.1, 3.5, 0.2] → probabilities [0.01, 0.94, 0.05]
+            # Example result: 94% positive, 5% neutral, 1% negative
+            probabilities = tf.nn.softmax(outputs.logits, axis=-1)
 
-            # Extract probabilities and convert to NumPy array
-            # .cpu(): Move from GPU to CPU if necessary
-            # .numpy(): Convert PyTorch tensor to NumPy array
-            # [0]: Get first (and only) result from batch
-            probs = probabilities.cpu().numpy()[0]
+            # WHAT: Extract probabilities and convert to NumPy array
+            # WHY: Easier to work with standard Python types than TensorFlow tensors
+            # HOW: Call .numpy() on TensorFlow tensor, get first (and only) batch result
+            # DATA: TensorFlow tensor → NumPy array [prob_positive, prob_negative, prob_neutral]
+            probs = probabilities.numpy()[0]
 
             # FinBERT class mapping:
             # Index 0 = positive (good news)
@@ -173,28 +189,39 @@ class FinBERTSentimentAnalyzer:
             raise RuntimeError("FinBERT model is not available; cannot perform batch sentiment analysis.")
 
         try:
-            # Tokenize all texts in batch
-            # Same parameters as single text, but handles multiple inputs
-            # The tokenizer automatically pads all texts to the same length
+            # WHAT: Tokenize all texts in batch for efficient processing
+            # WHY: Batch processing is much faster than one-by-one (GPU parallelism)
+            # HOW: Pass list of strings to tokenizer, it handles batching automatically
+            # DATA: List of text strings → batched tensors with shape (batch_size, seq_length)
+            # The tokenizer automatically pads all texts to the same length (longest in batch)
             inputs = self.tokenizer(
                 texts,  # List of strings
-                return_tensors="pt",
+                return_tensors="tf",  # TensorFlow tensors
                 truncation=True,
                 padding=True,  # Pads shorter texts to match longest in batch
                 max_length=512
-            ).to(self.device)
+            )
 
-            # Get model predictions for entire batch
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                # probabilities will have shape: (batch_size, 3)
-                # Example for 5 texts: (5, 3) → 5 rows, 3 columns
-                probabilities = torch.softmax(outputs.logits, dim=-1)
+            # WHAT: Get model predictions for entire batch in one forward pass
+            # WHY: GPUs can process multiple samples in parallel efficiently
+            # HOW: Pass batched inputs through model, get batched outputs
+            # DATA: inputs (batch_size, seq_length) → outputs.logits (batch_size, num_classes)
+            outputs = self.model(**inputs)
 
-            # Extract probabilities for each text
+            # WHAT: Convert raw logits to probabilities for all texts at once
+            # WHY: Softmax normalizes each row to valid probability distribution
+            # HOW: Apply softmax along class dimension (axis=-1)
+            # DATA: probabilities shape (batch_size, 3) where 3 = [positive, negative, neutral]
+            # Example for 5 texts: (5, 3) → 5 rows, 3 probability columns
+            probabilities = tf.nn.softmax(outputs.logits, axis=-1)
+
+            # WHAT: Extract probabilities for each text and convert to Python dicts
+            # WHY: Return format should be list of dictionaries for easy consumption
+            # HOW: Loop through each row (each text's probabilities), convert to dict
+            # DATA: TensorFlow tensor (batch_size, 3) → List[Dict[str, float]]
             results = []
             # Loop through each row (each text's probabilities)
-            for probs in probabilities.cpu().numpy():
+            for probs in probabilities.numpy():
                 results.append({
                     "positive": float(probs[0]),
                     "negative": float(probs[1]),

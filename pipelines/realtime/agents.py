@@ -2,17 +2,19 @@
 
 This file defines specialized AI "agents" that each perform specific analysis tasks.
 Think of agents as expert team members: one does predictions, one analyzes news,
-one tracks big investors, etc.
+one tracks big investors, one validates quality, etc.
 
 What this file does:
-- Defines AI agent classes (PredictionAgent, SentimentAgent, etc.)
+- Defines AI agent classes (PredictionAgent, SentimentAgent, ReflectionAgent, etc.)
 - Each agent has specialized logic for its task using deterministic ML pipelines
 - Provides helper functions to parse structured outputs
+- Imports ReflectionAgent for quality assurance and output validation
 
 Why we need agents:
 - Separates concerns (each agent has one job - Single Responsibility)
 - Reusable across different workflows
 - Easy to test independently
+- ReflectionAgent ensures quality control before user sees results
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from langchain_core.prompts import ChatPromptTemplate  # Creates formatted promp
 from langchain_core.runnables import Runnable, RunnableLambda  # Base classes for chainable components
 
 from .api_keys import get_api_key, get_available_api_keys  # Centralised API key helpers
+from .reflection import ReflectionAgent  # Quality assurance agent for output validation
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +204,7 @@ class SentimentAgent:
             from .sentiment.finbert import create_sentiment_analyzer
         except ImportError as exc:
             raise RuntimeError(
-                "FinBERT dependencies are missing. Install torch/transformers and download the model "
+                "FinBERT dependencies are missing. Install tensorflow/transformers and download the model "
                 "before running StockSense."
             ) from exc
 
