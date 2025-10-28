@@ -99,14 +99,23 @@ class PredictionAgent:
 
     def __init__(
         self,
-        llm: Optional[Runnable] = None,  # Deprecated parameter retained for backwards compatibility
+        llm: Optional[Runnable] = None,  # Can now be used for explanations
         *,
         use_ml_model: bool = True,  # Parameter retained for signature compatibility
+        use_gpt_explanations: bool = False  # Enable GPT-based explanations with SHAP
     ) -> None:
-        """Initialize the prediction agent in ML-only mode."""
-        if llm is not None:
-            logger.warning("PredictionAgent ignores provided LLM; operating in ML-only mode.")
+        """Initialize the prediction agent.
 
+        WHAT: Sets up forecaster and optional GPT explanation generator
+        WHY: ML for predictions, GPT for human-readable explanations
+        HOW: Load LSTM forecaster, optionally configure OpenAI LLM
+        DATA: Creates forecaster instance, stores LLM reference
+
+        Args:
+            llm: Optional LLM for generating explanations (OpenAI recommended)
+            use_ml_model: Always True, kept for compatibility
+            use_gpt_explanations: If True, use GPT to explain predictions with SHAP
+        """
         if not use_ml_model:
             logger.warning("PredictionAgent enforces ML-only mode; ignoring use_ml_model=False request.")
 
@@ -118,12 +127,54 @@ class PredictionAgent:
                 "Install the required model packages before running StockSense."
             ) from exc
 
-        self.forecaster = create_forecaster("gradient_boosting")
+        # WHAT: Initialize LSTM forecaster
+        # WHY: ML model for actual predictions
+        self.forecaster = create_forecaster("lstm")
         if self.forecaster is None:
             raise RuntimeError("create_forecaster returned None; ensure the forecaster is configured correctly.")
 
+        # WHAT: Store LLM for explanations
+        # WHY: GPT can generate high school level explanations
+        # HOW: Store reference, use only if enabled
+        self.llm = llm
+        self.use_gpt_explanations = use_gpt_explanations
+
+        # WHAT: Log configuration
+        if use_gpt_explanations and llm is not None:
+            logger.info("PredictionAgent: GPT explanations enabled with SHAP feature importance")
+        else:
+            logger.info("PredictionAgent: Using basic narrative (GPT disabled)")
+
     def _build_narrative(self, ticker: str, ml_result) -> str:
-        """Compose a deterministic narrative summarising the ML output."""
+        """Compose narrative explaining the ML prediction.
+
+        WHAT: Generates human-readable explanation of forecast
+        WHY: Users need to understand why model made its prediction
+        HOW: Use GPT with SHAP insights if enabled, else basic summary
+        DATA: ML result + SHAP -> narrative string
+
+        Args:
+            ticker: Stock symbol
+            ml_result: ForecastResult from LSTM model
+
+        Returns:
+            Narrative string explaining the prediction
+        """
+        # WHAT: Check if GPT explanations enabled
+        # WHY: Use GPT for better explanations if available
+        if self.use_gpt_explanations and self.llm is not None:
+            return self._build_gpt_narrative(ticker, ml_result)
+        else:
+            return self._build_basic_narrative(ticker, ml_result)
+
+    def _build_basic_narrative(self, ticker: str, ml_result) -> str:
+        """Build basic narrative without GPT.
+
+        WHAT: Creates simple string-based explanation
+        WHY: Fallback when GPT not available
+        HOW: String concatenation with key metrics
+        DATA: ML result -> formatted string
+        """
         probabilities = ml_result.model_metadata.get("probabilities", {}) if ml_result.model_metadata else {}
         prob_up = probabilities.get("up", 0.0)
         prob_down = probabilities.get("down", 0.0)
@@ -141,11 +192,88 @@ class PredictionAgent:
 
         return (
             f"{ticker.upper()} forecast: {ml_result.direction.upper()} with "
-            f"{ml_result.confidence:.1%} confidence using the gradient boosting forecaster. "
+            f"{ml_result.confidence:.1%} confidence using the LSTM forecaster. "
             f"Probability distribution - up: {prob_up:.1%}, down: {prob_down:.1%}, neutral: {prob_neutral:.1%}. "
             f"95% confidence horizon: {days} day(s). "
             f"Top contributing features: {feature_summary}."
         )
+
+    def _build_gpt_narrative(self, ticker: str, ml_result) -> str:
+        """Build GPT-powered narrative with SHAP explanations.
+
+        WHAT: Generates high school level explanation using GPT
+        WHY: GPT can create more natural, educational explanations
+        HOW: Prompt GPT with prediction + SHAP feature importance
+        DATA: ML result + SHAP -> GPT prompt -> narrative
+
+        Args:
+            ticker: Stock symbol
+            ml_result: ForecastResult with SHAP feature importance
+
+        Returns:
+            Paragraph-long explanation from GPT
+        """
+        # WHAT: Extract prediction details
+        probabilities = ml_result.model_metadata.get("probabilities", {}) if ml_result.model_metadata else {}
+        prob_up = probabilities.get("up", 0.0)
+        prob_down = probabilities.get("down", 0.0)
+        prob_neutral = probabilities.get("neutral", 0.0)
+
+        # WHAT: Get SHAP feature importance
+        # WHY: Explain which features drove the prediction
+        feature_importance = ml_result.feature_importance or {}
+        top_features = sorted(
+            feature_importance.items(),
+            key=lambda item: abs(item[1]),
+            reverse=True
+        )[:5]  # Top 5 features
+
+        # WHAT: Format features for prompt
+        features_text = "\n".join(
+            f"- {name}: {weight:.1%} importance"
+            for name, weight in top_features
+        ) if top_features else "No specific features identified"
+
+        # WHAT: Build GPT prompt
+        # WHY: Need clear instructions for high school level explanation
+        # HOW: Provide prediction, probabilities, and SHAP insights
+        prompt = f"""You are explaining a stock price prediction to a high school student. Write a clear, educational paragraph explaining the prediction.
+
+Stock: {ticker.upper()}
+Prediction: {ml_result.direction.upper()}
+Confidence: {ml_result.confidence:.1%}
+
+Probabilities:
+- Up: {prob_up:.1%}
+- Down: {prob_down:.1%}
+- Steady: {prob_neutral:.1%}
+
+Most Important Features (from SHAP analysis):
+{features_text}
+
+Write a single paragraph (4-6 sentences) that:
+1. States the prediction and confidence clearly
+2. Explains what the top features mean in simple terms
+3. Describes why these features suggest this direction
+4. Uses analogies or examples a high school student would understand
+
+Do not use jargon like "LSTM", "SHAP", or "gradient boosting". Instead say "our AI model" or "the prediction system".
+Be conversational but accurate. Focus on helping the student understand WHY the model made this prediction."""
+
+        try:
+            # Invoke GPT to generate explanation
+            response = self.llm.invoke(prompt)
+
+            # Extract text from response
+            if hasattr(response, 'content'):
+                return response.content
+            else:
+                return str(response)
+
+        except Exception as e:
+            # Fall back to basic narrative on error
+            logger.warning(f"GPT explanation failed: {e}, using basic narrative")
+            return self._build_basic_narrative(ticker, ml_result)
 
     def run(self, *, ticker: str, market_data: Dict, fundamentals: Dict[str, float]) -> PredictionResult:
         """Make a prediction for a stock using the gradient boosting forecaster."""
@@ -156,7 +284,7 @@ class PredictionAgent:
         try:
             ml_result = self.forecaster.predict(market_data, fundamentals)
         except Exception as exc:
-            raise RuntimeError(f"Gradient boosting forecaster failed for {ticker}: {exc}") from exc
+            raise RuntimeError(f"Forecasting ML model failed for {ticker}: {exc}") from exc
 
         return PredictionResult(
             direction=ml_result.direction,
