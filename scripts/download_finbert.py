@@ -127,7 +127,7 @@ class FinBERTDownloader:
         # Why: Missing any of these means model won't load
         required_files = [
             "config.json",  # Architecture config (layers, hidden size, etc.)
-            "pytorch_model.bin",  # Trained weights (largest file, ~400MB)
+            "tf_model.h5",  # Trained TensorFlow weights (largest file, ~400MB)
             "tokenizer_config.json",  # Tokenizer settings
             "vocab.txt",  # Word vocabulary for tokenization
         ]
@@ -179,17 +179,17 @@ class FinBERTDownloader:
         logger.info(f"Downloading {self.model_name} from Hugging Face...")
 
         try:
-            # Import transformers library
-            # What: Load Hugging Face transformers library
-            # Why: Provides download and model loading functionality
-            # How: Dynamic import (allows checking if library installed)
-            from transformers import AutoModel, AutoTokenizer
-            import torch  # PyTorch (deep learning framework)
+            # WHAT: Import transformers library and TensorFlow
+            # WHY: Provides download and model loading functionality for TensorFlow models
+            # HOW: Dynamic import (allows checking if library installed)
+            # DATA: Loads HuggingFace transformers with TensorFlow backend
+            from transformers import TFAutoModel, AutoTokenizer
+            import tensorflow as tf  # TensorFlow (deep learning framework)
 
-            # Download tokenizer
-            # What: Fetch tokenizer files from Hugging Face
-            # Why: Need tokenizer to convert text to model inputs
-            # How: from_pretrained downloads and caches automatically
+            # WHAT: Download tokenizer files from Hugging Face Hub
+            # WHY: Need tokenizer to convert text to model inputs (same for TF and PyTorch)
+            # HOW: from_pretrained downloads and caches automatically
+            # DATA: Downloads vocab.txt, tokenizer_config.json, special_tokens_map.json
             logger.info("Downloading tokenizer...")
             tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
@@ -198,17 +198,18 @@ class FinBERTDownloader:
             )
             logger.info("✓ Tokenizer downloaded")
 
-            # Download model
-            # What: Fetch model files from Hugging Face
-            # Why: Need model weights for sentiment predictions
-            # How: from_pretrained handles download and caching
-            logger.info("Downloading model (this may take a few minutes, ~400MB)...")
-            model = AutoModel.from_pretrained(
+            # WHAT: Download TensorFlow version of the model from Hugging Face
+            # WHY: Need TensorFlow model weights for sentiment predictions
+            # HOW: TFAutoModel.from_pretrained downloads TF checkpoint files
+            # DATA: Downloads tf_model.h5 or model.ckpt (TensorFlow format) instead of pytorch_model.bin
+            logger.info("Downloading TensorFlow model (this may take a few minutes, ~400MB)...")
+            model = TFAutoModel.from_pretrained(
                 self.model_name,
                 cache_dir=self.cache_dir,
-                force_download=self.force_download
+                force_download=self.force_download,
+                from_pt=False  # Download TensorFlow weights, not PyTorch
             )
-            logger.info("✓ Model downloaded")
+            logger.info("✓ TensorFlow model downloaded")
 
             # Verify download
             # What: Confirm all necessary files present
@@ -243,12 +244,12 @@ class FinBERTDownloader:
             return True
 
         except ImportError as e:
-            # Handle missing dependencies
-            # What: Catch error when transformers/torch not installed
-            # Why: Provide helpful error message instead of cryptic trace
-            # How: Catch ImportError specifically
+            # WHAT: Handle missing dependencies gracefully
+            # WHY: Provide helpful error message instead of cryptic trace
+            # HOW: Catch ImportError specifically and show installation command
+            # DATA: Returns False to indicate download failed
             logger.error("Required libraries not installed:")
-            logger.error("  pip install transformers torch")
+            logger.error("  pip install transformers tensorflow")
             logger.error(f"Error: {e}")
             return False
 
@@ -288,14 +289,15 @@ class FinBERTDownloader:
             return False
 
         try:
-            # Import libraries
-            # What: Load necessary libraries for testing
-            # Why: Need transformers and torch to load model
+            # WHAT: Import libraries for model verification
+            # WHY: Need transformers and TensorFlow to load and test model
+            # HOW: Import TensorFlow versions of transformers classes
+            # DATA: Loads TFAutoModelForSequenceClassification for TensorFlow models
             from transformers import (
-                AutoModelForSequenceClassification,
+                TFAutoModelForSequenceClassification,
                 AutoTokenizer,
             )
-            import torch
+            import tensorflow as tf
 
             # Load tokenizer
             # What: Load tokenizer from cache
@@ -307,21 +309,20 @@ class FinBERTDownloader:
                 local_files_only=True  # Fail if files not local (don't download)
             )
 
-            # Load model
-            # What: Load model from cache
-            # Why: Need model to run test prediction
-            # How: from_pretrained with local cache path
-            logger.info("Loading model...")
-            model = AutoModelForSequenceClassification.from_pretrained(
+            # WHAT: Load TensorFlow model from cache
+            # WHY: Need model to run test prediction and verify it works
+            # HOW: TFAutoModelForSequenceClassification.from_pretrained with local_files_only=True
+            # DATA: Loads tf_model.h5 from cache directory into memory
+            logger.info("Loading TensorFlow model...")
+            model = TFAutoModelForSequenceClassification.from_pretrained(
                 str(self.cache_dir),
-                local_files_only=True
+                local_files_only=True  # Fail if files not local (don't download)
             )
 
-            # Set model to evaluation mode
-            # What: Configure model for inference (not training)
-            # Why: Disables dropout, batch normalization behaves differently
-            # How: Call .eval() method
-            model.eval()
+            # WHAT: Note that TensorFlow models are in inference mode by default
+            # WHY: Unlike PyTorch, TensorFlow doesn't require explicit .eval() call
+            # HOW: TensorFlow models automatically disable training-specific layers
+            # DATA: Model is ready for prediction without additional configuration
 
             # Run test prediction
             # What: Predict sentiment on a sample financial headline
@@ -330,33 +331,36 @@ class FinBERTDownloader:
             logger.info("Running test prediction...")
             test_text = "Apple reports strong quarterly earnings, beating analyst expectations"
 
-            # Tokenize input text
-            # What: Convert text to model inputs
-            # Why: Models need numerical inputs, not strings
-            # How: Tokenizer handles conversion
+            # WHAT: Tokenize input text into numerical format
+            # WHY: Neural networks need numerical inputs, not strings
+            # HOW: Tokenizer converts text → token IDs, attention masks
+            # DATA: Text string → dictionary with TensorFlow tensors
             inputs = tokenizer(
                 test_text,
-                return_tensors="pt",  # PyTorch tensors
+                return_tensors="tf",  # TensorFlow tensors
                 truncation=True,
                 padding=True,
                 max_length=512
             )
 
-            # Run inference
-            # What: Forward pass through neural network
-            # Why: Get sentiment predictions
-            # How: torch.no_grad() disables gradients (faster inference)
-            with torch.no_grad():
-                outputs = model(**inputs)
-                # outputs.logits: raw scores from model
-                # softmax: convert to probabilities
-                probabilities = torch.softmax(outputs.logits, dim=-1)
+            # WHAT: Run inference (forward pass through neural network)
+            # WHY: Get sentiment predictions to verify model works
+            # HOW: Pass inputs to model, apply softmax to get probabilities
+            # DATA: inputs (tensors) → outputs.logits (raw scores) → probabilities (0-1 range)
+            # Note: TensorFlow models don't need torch.no_grad() context manager
+            outputs = model(**inputs)
 
-            # Extract probabilities
-            # What: Convert tensor to Python floats
-            # Why: Easier to work with standard Python types
-            # How: .cpu().numpy()[0] moves to CPU, converts to numpy, gets first result
-            probs = probabilities.cpu().numpy()[0]
+            # WHAT: Convert raw logits to probabilities using softmax
+            # WHY: Logits are unbounded; softmax normalizes to [0,1] summing to 1
+            # HOW: Apply tf.nn.softmax along class dimension (axis=-1)
+            # DATA: logits → probabilities for [positive, negative, neutral]
+            probabilities = tf.nn.softmax(outputs.logits, axis=-1)
+
+            # WHAT: Extract probabilities and convert to NumPy array
+            # WHY: Easier to work with standard Python types than TensorFlow tensors
+            # HOW: Call .numpy() on TensorFlow tensor, get first (and only) batch result
+            # DATA: TensorFlow tensor → NumPy array [prob_pos, prob_neg, prob_neu]
+            probs = probabilities.numpy()[0]
 
             # Log results
             # What: Show prediction results
@@ -389,9 +393,12 @@ class FinBERTDownloader:
             return True
 
         except ImportError as e:
-            # Handle missing dependencies
+            # WHAT: Handle missing dependencies gracefully
+            # WHY: Provide helpful error message with correct installation command
+            # HOW: Catch ImportError and show TensorFlow installation instructions
+            # DATA: Returns False to indicate verification failed
             logger.error("Required libraries not installed for verification:")
-            logger.error("  pip install transformers torch")
+            logger.error("  pip install transformers tensorflow")
             logger.error(f"Error: {e}")
             return False
 
