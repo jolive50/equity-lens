@@ -4,6 +4,15 @@
 
 StockSense is a machine-learning-powered stock analysis platform that provides explainable forecasts, sentiment analysis, and smart money tracking for retail investors. This project strictly avoids LLM fallbacks for core ML functionality and follows enterprise software engineering standards.
 
+**Project Context:**
+- **Team Size:** 5 students
+- **Project Type:** College capstone project
+- **Development Environment:** Local machines only
+- **Data Sources:** Free APIs and open datasets only
+- **Architecture:** Layered AI capability system with coordinated agents
+
+See [docs/ARCHITECTURE_ALIGNMENT.md](docs/ARCHITECTURE_ALIGNMENT.md) for detailed architecture diagrams and team assignments.
+
 ## Core Engineering Principles
 
 ### 1. Software Engineering Best Practices
@@ -469,6 +478,317 @@ class JSONRepository:
         pass
 ```
 
+## Architecture Layers
+
+StockSense follows a layered architecture with clear separation of concerns:
+
+### Layer 1: END USERS
+- **Web UI / API Gateway** - FastAPI backend (`pipelines/realtime/api.py`)
+- **Frontend Dashboard** - Next.js React app (`frontend/`)
+- **Responsibilities:** User authentication, request routing, response formatting
+
+### Layer 2: AI CAPABILITY LAYER (Agents)
+
+#### COORDINATOR Agent
+- **File:** `pipelines/realtime/agents.py` - `CoordinationAgent`
+- **Purpose:** Orchestrates multiple working agents, synthesizes insights
+- **Key Feature:** Enforces 95% confidence threshold before recommendations
+- **Pattern:** Receives results from all working agents → calculates weighted confidence → generates synthesis
+
+#### PREDICTION Agent
+- **File:** `pipelines/realtime/agents.py` - `PredictionAgent`
+- **Purpose:** ML-powered price direction forecasting
+- **Key Feature:** Probabilistic 30-day forecasts with confidence horizons
+- **Pattern:** Market data + fundamentals → gradient boosting model → direction + confidence + daily probabilities
+
+#### SENTIMENT Agent
+- **File:** `pipelines/realtime/agents.py` - `SentimentAgent`
+- **Purpose:** FinBERT-powered financial news sentiment analysis
+- **Key Feature:** Sector-wide sentiment aggregation, no LLM fallback
+- **Pattern:** News articles → FinBERT tokenization → sentiment score + trend + headlines
+
+#### FILING Agent (SmartMoneyAgent)
+- **File:** `pipelines/realtime/agents.py` - `SmartMoneyAgent`
+- **Purpose:** Institutional activity tracking via SEC filings
+- **Key Feature:** 13F filings, insider transactions, congressional trades
+- **Pattern:** Ticker → SEC EDGAR API + Finnhub → institutional/insider/congress summaries
+
+#### REFLECTION Agent ⚠️ (To Be Implemented)
+- **File:** `pipelines/realtime/agents/reflection.py` (NEW)
+- **Purpose:** Quality assurance and self-critique
+- **Key Features:**
+  - Validates prediction reasonableness
+  - Checks sentiment-prediction alignment
+  - Detects stale or missing data
+  - Recalibrates confidence scores
+  - Ensures output coherence
+- **Pattern:** All agent outputs → validation checks → warnings + confidence adjustments
+- **Priority:** CRITICAL - Implement first (see [ARCHITECTURE_ALIGNMENT.md](docs/ARCHITECTURE_ALIGNMENT.md))
+
+**Reflection Agent Implementation Template:**
+```python
+class ReflectionAgent:
+    """
+    Quality assurance agent that validates other agents' outputs.
+
+    WHAT: Reviews prediction, sentiment, and filing results for consistency
+    WHY: Catches errors before users see them, improves reliability
+    HOW: Rule-based validation + optional LLM critique
+    DATA: Agent outputs → validation results → confidence adjustments
+    """
+
+    def run(self, *,
+            prediction: Dict,
+            sentiment: Dict,
+            filing: Dict,
+            market_data: Dict,
+            fundamentals: Dict) -> Dict[str, Any]:
+        """
+        Validate agent outputs and flag quality issues.
+
+        Args:
+            prediction: PredictionAgent result with direction, confidence
+            sentiment: SentimentAgent result with sentiment, score, trend
+            filing: SmartMoneyAgent result with institutional activity
+            market_data: Historical price/volume data
+            fundamentals: Company financial metrics
+
+        Returns:
+            Dict with:
+                - validation_passed: bool
+                - confidence_adjustment: float (-0.2 to 0.0)
+                - issues: List[str] - warnings about data quality
+                - recommendations: List[str] - suggested fixes
+        """
+        issues = []
+        confidence_adjustment = 0.0
+
+        # WHAT: Check if prediction direction aligns with sentiment
+        # WHY: Large divergence suggests data issue or model error
+        # HOW: Compare prediction direction with sentiment polarity
+        # DATA: prediction["direction"] vs sentiment["current"]
+        if self._check_sentiment_alignment(prediction, sentiment):
+            issues.append("Prediction direction conflicts with sentiment")
+            confidence_adjustment -= 0.1
+
+        # WHAT: Verify data freshness
+        # WHY: Stale data leads to unreliable forecasts
+        # HOW: Check timestamps on market data and news
+        # DATA: market_data timestamps vs current date
+        if self._check_data_freshness(market_data):
+            issues.append("Market data is stale (>2 days old)")
+            confidence_adjustment -= 0.15
+
+        # WHAT: Validate prediction reasonableness
+        # WHY: Catch numerical errors or model bugs
+        # HOW: Check confidence in valid range, direction not null
+        # DATA: prediction["confidence"] should be [0, 1]
+        if not self._check_prediction_validity(prediction):
+            issues.append("Prediction confidence out of valid range")
+            confidence_adjustment -= 0.2
+
+        # WHAT: Check for missing fundamental data
+        # WHY: Forecaster needs complete features for accuracy
+        # HOW: Verify all required fundamentals present
+        # DATA: fundamentals dict should have pe_ratio, revenue_growth, etc.
+        if self._check_fundamentals_completeness(fundamentals):
+            issues.append("Missing critical fundamental metrics")
+            confidence_adjustment -= 0.05
+
+        return {
+            "validation_passed": len(issues) == 0,
+            "confidence_adjustment": confidence_adjustment,
+            "issues": issues,
+            "recommendations": self._generate_recommendations(issues)
+        }
+
+    def _check_sentiment_alignment(self, prediction: Dict, sentiment: Dict) -> bool:
+        """Check if prediction and sentiment align."""
+        # WHAT: Compare prediction direction with sentiment polarity
+        # WHY: Large mismatch suggests possible error
+        # HOW: Map sentiment to expected direction, check agreement
+        pred_direction = prediction["direction"]
+        sentiment_current = sentiment["current"]
+
+        # Sentiment should roughly align with prediction
+        if pred_direction == "up" and sentiment_current == "negative":
+            return True  # Misalignment detected
+        if pred_direction == "down" and sentiment_current == "positive":
+            return True  # Misalignment detected
+
+        return False  # Alignment OK
+
+    def _check_data_freshness(self, market_data: Dict) -> bool:
+        """Check if market data is recent."""
+        # WHAT: Verify market data timestamp
+        # WHY: Stale data yields unreliable forecasts
+        # HOW: Compare latest data point timestamp with current date
+        from datetime import datetime, timedelta
+
+        if not market_data or not isinstance(market_data, list):
+            return True  # Missing data
+
+        latest_date = market_data[-1].get("date")
+        if not latest_date:
+            return True  # No date information
+
+        # Check if data is older than 2 trading days
+        days_old = (datetime.now() - datetime.fromisoformat(latest_date)).days
+        return days_old > 3  # True if stale
+
+    def _check_prediction_validity(self, prediction: Dict) -> bool:
+        """Check if prediction values are valid."""
+        # WHAT: Validate prediction confidence and direction
+        # WHY: Catch model errors or data corruption
+        # HOW: Check ranges and required fields
+        if not prediction:
+            return False
+
+        confidence = prediction.get("confidence")
+        direction = prediction.get("direction")
+
+        # Confidence must be [0, 1]
+        if confidence is None or not (0 <= confidence <= 1):
+            return False
+
+        # Direction must be valid
+        if direction not in ["up", "down", "neutral"]:
+            return False
+
+        return True
+
+    def _check_fundamentals_completeness(self, fundamentals: Dict) -> bool:
+        """Check if all required fundamentals are present."""
+        # WHAT: Verify fundamental metrics completeness
+        # WHY: Missing metrics degrade forecast quality
+        # HOW: Check for required keys in fundamentals dict
+        required_keys = ["pe_ratio", "revenue_growth", "ebitda_margin"]
+        return any(key not in fundamentals for key in required_keys)
+
+    def _generate_recommendations(self, issues: List[str]) -> List[str]:
+        """Generate actionable recommendations based on issues."""
+        # WHAT: Map issues to suggested fixes
+        # WHY: Help users understand what to do next
+        # HOW: Pattern match issue text, return fixes
+        recommendations = []
+
+        if any("stale" in issue.lower() for issue in issues):
+            recommendations.append("Refresh market data from data adapter")
+
+        if any("conflict" in issue.lower() for issue in issues):
+            recommendations.append("Review news articles for recent developments")
+
+        if any("missing" in issue.lower() for issue in issues):
+            recommendations.append("Update fundamentals from Alpha Vantage")
+
+        return recommendations
+```
+
+#### EXPLANATION Agent
+- **File:** `pipelines/realtime/agents.py` - `ExplanationAgent`
+- **Purpose:** LLM-powered natural language insight generation
+- **Key Feature:** Only agent allowed to use LLM for text generation
+- **Pattern:** All agent results → LLM synthesis → plain English explanation
+
+### Layer 3: TOOLS LAYER
+
+#### Market Data Tools
+- **File:** `pipelines/realtime/data_adapters.py`
+- **Providers:** Alpha Vantage, Tiingo, Yahoo Finance, Finnhub
+- **Pattern:** Abstract `BaseDataAdapter` → concrete provider implementations
+- **Free Tier Limits:** Alpha Vantage (500/day), Finnhub (60/min)
+
+#### News Tools
+- **File:** `pipelines/realtime/news/`
+- **Features:** Article fetching, deduplication, relevance filtering
+- **Pattern:** Multi-source aggregation with fallback providers
+
+#### Filing Tools
+- **File:** `pipelines/realtime/smart_money/`
+- **Sources:** SEC EDGAR 13F filings, insider transactions
+- **Pattern:** Parse XML filings → extract holdings → track changes
+
+#### Utility Functions ⚠️ (To Be Organized)
+- **Status:** Currently scattered across modules
+- **Target:** Centralize in `pipelines/realtime/tools/utils.py`
+- **Contents:** Date/time utils, financial calculations, validation helpers
+
+### Layer 4: STORAGE & LLMs
+
+#### JSON Repository (Current - Development)
+- **File:** `pipelines/realtime/repository.py`
+- **Use Cases:** Watchlists, analysis history, alerts
+- **Features:** File locking, atomic writes
+- **Suitable For:** 5-student team, local development
+
+#### ChromaDB ⚠️ (To Be Added - High Priority)
+- **Purpose:** Vector database for semantic search
+- **Use Cases:** Similar news retrieval, historical pattern matching
+- **Implementation:** `pipelines/realtime/storage/vector_store.py`
+- **Priority:** HIGH (see [ARCHITECTURE_ALIGNMENT.md](docs/ARCHITECTURE_ALIGNMENT.md))
+
+#### Metrics Database ⚠️ (To Be Added)
+- **Technology:** SQLite for local development
+- **Purpose:** Track model performance, API usage, analysis metrics
+- **Implementation:** `pipelines/realtime/storage/metrics_db.py`
+
+#### PostgreSQL (Future - Production)
+- **Status:** Documented in backlog
+- **Purpose:** Production-grade persistence for multi-user deployment
+- **Priority:** LOW for capstone (JSON sufficient for local development)
+
+## Team Collaboration Guidelines (5 Students)
+
+### Student Assignment Strategy
+
+When working as a 5-person team, divide responsibilities by technical focus:
+
+**Student 1: ML & Prediction**
+- Maintain PredictionAgent and forecaster model
+- Implement Reflection Agent validation logic
+- Train and evaluate models
+- Files: `agents.py` (PredictionAgent, ReflectionAgent), `models/forecaster.py`
+
+**Student 2: NLP & Sentiment**
+- Maintain SentimentAgent and FinBERT integration
+- Implement ChromaDB for news embeddings
+- Semantic search features
+- Files: `agents.py` (SentimentAgent), `sentiment/finbert.py`, `storage/vector_store.py`
+
+**Student 3: Data Engineering**
+- Tools layer organization
+- Data adapters and API integrations
+- Metrics database implementation
+- Files: `data_adapters.py`, `tools/`, `storage/metrics_db.py`
+
+**Student 4: Backend & Orchestration**
+- LangGraph workflow enhancements
+- CoordinationAgent improvements
+- FastAPI endpoints
+- Files: `langgraph_workflow.py`, `api.py`, `agents.py` (CoordinationAgent)
+
+**Student 5: Frontend & UX**
+- Next.js dashboard enhancements
+- Reflection agent feedback display
+- Chart improvements for probabilistic forecasts
+- Files: `frontend/` directory, API integration
+
+### Code Review Protocol
+
+- **Every pull request** requires review from at least one other team member
+- **Architecture changes** require review from Student 4 (orchestration lead)
+- **ML model changes** require review from Student 1 (ML lead)
+- **Frontend changes** should be tested on all team members' machines (local development)
+
+### Local Development Coordination
+
+Since this is a local-only project:
+- **Use Git branches** for feature development
+- **Never commit** `.env` files with API keys
+- **Share API keys** via secure channel (not Git)
+- **Run full test suite** before committing: `python scripts/run_tests.py`
+- **Document local setup** issues in README.md
+
 ## Summary
 
 This document defines the engineering standards for StockSense development. When contributing code:
@@ -480,5 +800,15 @@ This document defines the engineering standards for StockSense development. When
 5. **No LLM fallbacks** - ML models only, fail fast if unavailable
 6. **Update docs** - Keep `docs/` synchronized with code changes
 7. **Challenge conflicts** - Alert user if request contradicts project direction
+8. **Follow architecture layers** - Respect separation between Users → AI → Tools → Storage
+9. **Implement Reflection Agent** - Critical for quality assurance (Priority 1)
+10. **Use free data sources only** - Respect API rate limits, never pay for data
 
-These rules ensure maintainable, reliable, production-grade code that meets enterprise standards.
+These rules ensure maintainable, reliable, production-grade code that meets enterprise standards and capstone project requirements.
+
+## Quick Reference Links
+
+- [Architecture Alignment Plan](docs/ARCHITECTURE_ALIGNMENT.md) - Detailed architecture diagrams and team assignments
+- [AGENT.md](AGENT.md) - AI agent implementation guidelines
+- [Implementation Status](docs/IMPLEMENTATION_STATUS.md) - Current progress tracker
+- [Data Inventory](docs/DATA_INVENTORY.md) - Available datasets and metrics (225+ financial metrics)

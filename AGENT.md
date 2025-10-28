@@ -8,11 +8,27 @@ This document provides implementation-level instructions for AI agents (LangGrap
 
 ### 1. LangGraph Analysis Agents (Production Code)
 These agents run in production to analyze stocks:
-- **ForecastAgent**: Price prediction using trained ML models
+- **CoordinationAgent**: Orchestrates multiple working agents and synthesizes insights
+- **PredictionAgent**: Price prediction using trained ML models (gradient boosting forecaster)
 - **SentimentAgent**: FinBERT-powered news sentiment analysis
-- **SmartMoneyAgent**: SEC EDGAR institutional activity tracking
+- **SmartMoneyAgent (Filing Agent)**: SEC EDGAR institutional activity tracking
+- **ReflectionAgent ⚠️ (TO BE IMPLEMENTED)**: Quality assurance and self-critique
 - **ExplanationAgent**: Natural language insight generation (LLM-powered)
-- **AlertAgent**: Risk threshold monitoring and notifications
+- **HistoricalAnalysisAgent**: Multi-company historical data analysis
+- **SentimentAnalysisAgent**: Sector-wide sentiment aggregation
+
+**Architecture Note:** StockSense follows a layered architecture:
+```
+END USERS (Web UI / API Gateway)
+    ↓
+AI CAPABILITY LAYER (Agents above)
+    ↓
+TOOLS LAYER (Market Data, News, Filing APIs, Utilities)
+    ↓
+STORAGE & LLMs (JSON/PostgreSQL, ChromaDB, Metrics DB)
+```
+
+See [docs/ARCHITECTURE_ALIGNMENT.md](docs/ARCHITECTURE_ALIGNMENT.md) for detailed architecture diagrams.
 
 ### 2. Development Agents (This Agent)
 AI assistants that write, refactor, and test code for this project.
@@ -748,6 +764,232 @@ except Exception:
    - Format code: `black pipelines/`
    - Lint: `ruff check pipelines/`
 
+## Reflection Agent Pattern ⚠️ (Critical - To Be Implemented)
+
+### Overview
+
+The **Reflection Agent** is a quality assurance agent that validates outputs from other agents before they reach users. This is a critical missing component in the current architecture.
+
+**Why It's Important:**
+- Catches prediction errors before users see them
+- Validates data quality and freshness
+- Improves confidence calibration
+- Prevents misleading recommendations
+- Adds professional quality control layer
+
+**Priority:** CRITICAL - Should be implemented first (see [docs/ARCHITECTURE_ALIGNMENT.md](docs/ARCHITECTURE_ALIGNMENT.md))
+
+### Implementation Requirements
+
+#### File Location
+- `pipelines/realtime/agents/reflection.py` (NEW FILE)
+- Import into `pipelines/realtime/agents.py`
+- Integrate into `langgraph_workflow.py`
+
+#### Core Validation Checks
+
+**1. Prediction Reasonableness**
+```python
+def _check_prediction_validity(self, prediction: Dict) -> bool:
+    """
+    WHAT: Validate prediction confidence and direction values
+    WHY: Catch model errors or data corruption early
+    HOW: Check confidence in [0,1] range, direction is valid
+    DATA: prediction dict -> bool (valid or not)
+    """
+    if not prediction:
+        return False
+
+    confidence = prediction.get("confidence")
+    direction = prediction.get("direction")
+
+    # Confidence must be in valid range
+    if confidence is None or not (0 <= confidence <= 1):
+        return False
+
+    # Direction must be one of three valid values
+    if direction not in ["up", "down", "neutral"]:
+        return False
+
+    return True
+```
+
+**2. Sentiment-Prediction Alignment**
+```python
+def _check_sentiment_alignment(self, prediction: Dict, sentiment: Dict) -> bool:
+    """
+    WHAT: Check if prediction direction aligns with news sentiment
+    WHY: Large mismatches suggest data issues or model errors
+    HOW: Compare prediction direction with sentiment polarity
+    DATA: Returns True if misalignment detected, False if aligned
+    """
+    pred_direction = prediction["direction"]
+    sentiment_current = sentiment["current"]
+
+    # Flag obvious conflicts
+    if pred_direction == "up" and sentiment_current == "negative":
+        return True  # Misalignment detected
+    if pred_direction == "down" and sentiment_current == "positive":
+        return True  # Misalignment detected
+
+    return False  # Alignment OK
+```
+
+**3. Data Freshness Check**
+```python
+def _check_data_freshness(self, market_data: Dict) -> bool:
+    """
+    WHAT: Verify market data is recent (< 2 trading days old)
+    WHY: Stale data leads to unreliable forecasts
+    HOW: Compare latest data point timestamp with current date
+    DATA: Returns True if stale, False if fresh
+    """
+    from datetime import datetime
+
+    if not market_data or not isinstance(market_data, list):
+        return True  # Missing data flagged as stale
+
+    latest_date = market_data[-1].get("date")
+    if not latest_date:
+        return True  # No date information
+
+    # Check if data is older than 3 days (2 trading days + buffer)
+    days_old = (datetime.now() - datetime.fromisoformat(latest_date)).days
+    return days_old > 3
+```
+
+**4. Fundamentals Completeness**
+```python
+def _check_fundamentals_completeness(self, fundamentals: Dict) -> bool:
+    """
+    WHAT: Check if all required fundamental metrics are present
+    WHY: Missing metrics degrade forecast quality
+    HOW: Verify required keys exist in fundamentals dict
+    DATA: Returns True if incomplete, False if complete
+    """
+    required_keys = ["pe_ratio", "revenue_growth", "ebitda_margin"]
+    return any(key not in fundamentals for key in required_keys)
+```
+
+#### Output Format
+
+The Reflection Agent should return:
+```python
+{
+    "validation_passed": bool,              # Overall validation result
+    "confidence_adjustment": float,         # How much to adjust confidence (-0.2 to 0.0)
+    "issues": List[str],                    # List of problems found
+    "recommendations": List[str]             # Actionable fixes
+}
+```
+
+#### Integration into Workflow
+
+Update `langgraph_workflow.py`:
+```python
+def run_reflection(state: StockAnalysisState) -> StockAnalysisState:
+    """
+    WHAT: Validate all agent outputs before explanation
+    WHY: Catch errors early, adjust confidence appropriately
+    HOW: Call ReflectionAgent with all results, apply adjustments
+    DATA: state with agent results -> state with reflection + adjusted confidence
+    """
+    reflection_result = reflection_agent.run(
+        prediction=state["prediction_result"],
+        sentiment=state["sentiment_result"],
+        filing=state["smart_money_data"],
+        market_data=state["market_data"],
+        fundamentals=state["fundamentals"]
+    )
+
+    # Apply confidence adjustment
+    if not reflection_result["validation_passed"]:
+        # Downgrade confidence level if issues found
+        if state["confidence_level"] == "high":
+            state["confidence_level"] = "medium"
+        elif state["confidence_level"] == "medium":
+            state["confidence_level"] = "low"
+
+        # Add issues to warnings
+        state["warnings"].extend(reflection_result["issues"])
+
+    state["reflection_result"] = reflection_result
+    return state
+
+# Add to workflow
+builder.add_node("reflection", run_reflection)
+builder.add_edge("smart_money", "reflection")  # After all analysis
+builder.add_edge("reflection", "explain")       # Before explanation
+```
+
+### Testing Requirements
+
+Create `tests/unit/test_reflection.py`:
+
+**Test Cases:**
+1. Test valid prediction passes validation
+2. Test invalid confidence (>1.0) fails validation
+3. Test sentiment-prediction alignment detection
+4. Test stale data detection
+5. Test missing fundamentals detection
+6. Test confidence adjustment calculations
+7. Test recommendation generation
+
+**Example Test:**
+```python
+def test_stale_data_detected():
+    """
+    WHAT: Verify reflection agent detects stale market data
+    WHY: Stale data should trigger warnings
+    HOW: Pass old data, assert stale flag returned
+    """
+    from datetime import datetime, timedelta
+
+    # Create stale market data (5 days old)
+    old_date = (datetime.now() - timedelta(days=5)).isoformat()
+    market_data = [{"date": old_date, "close": 150.0}]
+
+    reflection_agent = ReflectionAgent()
+    result = reflection_agent.run(
+        prediction={"direction": "up", "confidence": 0.85},
+        sentiment={"current": "positive", "score": 0.7},
+        filing={},
+        market_data=market_data,
+        fundamentals={"pe_ratio": 25}
+    )
+
+    # Should flag stale data
+    assert not result["validation_passed"]
+    assert any("stale" in issue.lower() for issue in result["issues"])
+    assert result["confidence_adjustment"] < 0
+```
+
+### Student Assignment
+
+**Assigned to:** Student 1 (ML & Prediction Focus)
+
+**Timeline:** Week 1 (20 hours)
+
+**Deliverables:**
+1. `pipelines/realtime/agents/reflection.py` - Complete implementation
+2. `tests/unit/test_reflection.py` - Full test coverage (>80%)
+3. Integration into `langgraph_workflow.py`
+4. Documentation update in [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)
+
+**Dependencies:**
+- Requires understanding of existing agents (PredictionAgent, SentimentAgent)
+- Needs access to workflow state structure
+- Should coordinate with Student 4 (orchestration) for LangGraph integration
+
+### Success Criteria
+
+- [ ] All validation checks implemented
+- [ ] Test coverage >80%
+- [ ] Integrated into workflow after smart_money node
+- [ ] Confidence adjustments working correctly
+- [ ] Issues and recommendations displayed in UI
+- [ ] No performance degradation (< 500ms execution time)
+
 ## Summary
 
 As a development agent working on StockSense:
@@ -759,5 +1001,15 @@ As a development agent working on StockSense:
 5. **No LLM fallbacks** - fail fast with actionable errors
 6. **Update docs** in `docs/` folder when changing code
 7. **Challenge conflicts** - alert user if request violates architecture
+8. **Respect architecture layers** - Follow Users → AI → Tools → Storage separation
+9. **Implement Reflection Agent first** - Critical for quality assurance
+10. **Use free data sources only** - Respect API rate limits
 
 These guidelines ensure generated code meets production quality standards and integrates seamlessly with the existing codebase.
+
+## Quick Reference
+
+- [CLAUDE.md](CLAUDE.md) - AI agent development guidelines and architecture overview
+- [docs/ARCHITECTURE_ALIGNMENT.md](docs/ARCHITECTURE_ALIGNMENT.md) - Detailed architecture alignment plan
+- [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) - Current progress tracker
+- [docs/DATA_INVENTORY.md](docs/DATA_INVENTORY.md) - Available datasets and metrics
