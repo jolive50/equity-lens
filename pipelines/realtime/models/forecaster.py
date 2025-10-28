@@ -1,10 +1,9 @@
 """Probabilistic forecasting models for stock price direction prediction.
 
 This module implements a real machine learning model that predicts whether a stock
-will go up, down, or stay neutral. It uses gradient boosting with carefully engineered
-features from price and volume data.
+will go up, down, or stay neutral.
 
-Key Concepts (College Student Level):
+Features:
 - ML Model: A program that learns patterns from historical data to make predictions
 - Features: Measurable characteristics we extract from data (like RSI, MACD)
 - Training: Showing the model many examples so it learns patterns
@@ -15,9 +14,18 @@ from __future__ import annotations
 import logging
 import numpy as np
 import pandas as pd
+import pickle
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
+
+# TensorFlow/Keras for LSTM model
+import tensorflow as tf
+from tensorflow import keras
+
+# SHAP for model explainability
+import shap
 
 # Scikit-learn: Popular Python library for machine learning
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -31,12 +39,149 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class TrainingConfig:
+    """Configuration for LSTM training process.
+
+    WHAT: Centralized settings for model architecture and training
+    WHY: Makes hyperparameters easy to adjust without code changes
+    DATA: All training parameters in one place
+    """
+    # Data paths
+    data_dir: str = "data/training/raw/kaggle_sp500/individual_stocks_5yr/individual_stocks_5yr"
+    model_save_dir: str = "pipelines/realtime/models/saved_models"
+
+    # Model architecture
+    sequence_length: int = 30  # Days of history to use for prediction
+    lstm_layer1_units: int = 128  # First LSTM layer size
+    lstm_layer2_units: int = 64   # Second LSTM layer size
+    dropout_rate: float = 0.2     # Dropout for regularization
+
+    # Training parameters
+    batch_size: int = 64
+    epochs: int = 50
+    validation_split: float = 0.2  # 20% for validation
+    calibration_split: float = 0.1  # 10% for calibration (from train set)
+    learning_rate: float = 0.001
+
+    # Class labels
+    num_classes: int = 3  # up, down, steady
+    price_change_threshold: float = 0.02  # ±2% for up/down classification (if not using ATR)
+
+    # ATR-based dynamic thresholding
+    use_atr_threshold: bool = True  # Use ATR-based threshold instead of fixed percentage
+    atr_window: int = 14  # ATR calculation window (standard is 14 days)
+    atr_multiplier: float = 0.3  # Threshold = ATR * multiplier (0.3 gives best balance)
+
+
+class ProbabilityCalibrator:
+    """Calibrates model probabilities to match true frequencies.
+
+    WHAT: Ensures predicted probabilities are well-calibrated
+    WHY: Want 70% confidence to mean 70% actual accuracy
+    HOW: Uses isotonic regression on calibration set
+    DATA: Raw probabilities -> calibrated probabilities
+    """
+
+    def __init__(self):
+        """Initialize calibrator.
+
+        WHAT: Set up calibration storage
+        WHY: Will store calibration curves
+        """
+        self.calibration_maps = {}
+
+    def fit(self, y_true: np.ndarray, y_proba: np.ndarray,
+            class_idx: int) -> None:
+        """Fit calibration map for a specific class.
+
+        WHAT: Learn mapping from predicted to calibrated probabilities
+        WHY: Model probabilities often poorly calibrated out-of-box
+        HOW: Use calibration curve to map predicted -> true frequency
+        DATA: True labels + predictions -> calibration mapping
+
+        Args:
+            y_true: True labels
+            y_proba: Predicted probabilities for class
+            class_idx: Which class (0=down, 1=steady, 2=up)
+        """
+        from sklearn.calibration import calibration_curve
+
+        # WHAT: Create binary labels for this class
+        # WHY: Calibration curve needs binary (class vs not-class)
+        # DATA: Multi-class labels -> binary labels
+        y_binary = (y_true == class_idx).astype(int)
+
+        # WHAT: Calculate calibration curve
+        # WHY: Shows how predicted probabilities relate to true frequencies
+        # HOW: Bin predictions, calculate actual frequency in each bin
+        # DATA: Predictions -> (true_freq, pred_mean) pairs
+        fraction_of_positives, mean_predicted_value = calibration_curve(
+            y_binary, y_proba, n_bins=10, strategy='quantile'
+        )
+
+        # WHAT: Store calibration mapping
+        # WHY: Use for transforming future predictions
+        # DATA: Arrays of (predicted, actual) points
+        self.calibration_maps[class_idx] = {
+            'true_freq': fraction_of_positives,
+            'pred_mean': mean_predicted_value
+        }
+
+        logger.info(f"Calibration for class {class_idx}:")
+        logger.info(f"  Predicted: {mean_predicted_value}")
+        logger.info(f"  Actual: {fraction_of_positives}")
+
+    def calibrate(self, proba: np.ndarray) -> np.ndarray:
+        """Apply calibration to probabilities.
+
+        WHAT: Transform predicted probabilities using calibration maps
+        WHY: Get better-calibrated confidence estimates
+        HOW: Interpolate using calibration curves
+        DATA: Raw probabilities -> calibrated probabilities
+
+        Args:
+            proba: Raw predicted probabilities (n_samples, n_classes)
+
+        Returns:
+            Calibrated probabilities (n_samples, n_classes)
+        """
+        calibrated = np.zeros_like(proba)
+
+        for class_idx in range(proba.shape[1]):
+            if class_idx not in self.calibration_maps:
+                # WHAT: If no calibration available, use raw probabilities
+                # WHY: Better than failing completely
+                calibrated[:, class_idx] = proba[:, class_idx]
+                continue
+
+            # WHAT: Get calibration map for this class
+            cal_map = self.calibration_maps[class_idx]
+
+            # WHAT: Interpolate predicted probabilities to calibrated values
+            # WHY: Map predicted -> actual frequency
+            # HOW: Linear interpolation between calibration points
+            calibrated[:, class_idx] = np.interp(
+                proba[:, class_idx],
+                cal_map['pred_mean'],
+                cal_map['true_freq']
+            )
+
+        # WHAT: Renormalize to ensure probabilities sum to 1
+        # WHY: Calibration may break probability axiom
+        # HOW: Divide each by row sum
+        row_sums = calibrated.sum(axis=1, keepdims=True)
+        calibrated = calibrated / row_sums
+
+        return calibrated
+
+
+@dataclass
 class ForecastResult:
     """Result from probabilistic forecasting model.
 
-    Think of this as a report card for our prediction. It contains:
+    Contains:
     - direction: Which way the stock is likely to move (up/down/neutral)
-    - confidence: How sure we are (0.0 = guessing, 1.0 = very sure)
+    - confidence: How sure we are (0.0 = guessing, 1.0 = certain)
     - daily_probs: Probability breakdown for each of the next 30 days
     - horizon_95: How many days we can maintain 95%+ confidence
     - feature_importance: Which factors influenced the prediction most
@@ -546,29 +691,49 @@ class ProbabilisticForecaster:
 
     What this does: Predicts whether a stock will go up, down, or stay neutral
     Why probabilistic: Instead of just "up" or "down", gives probability (e.g., 85% chance up)
-    How it works: Uses gradient boosting ML algorithm trained on historical patterns
+    How it works: Uses pre-trained LSTM neural network or fallback gradient boosting
 
     Think of this as a smart system that has studied thousands of stock patterns
     and can now recognize similar patterns in new data.
     """
 
-    def __init__(self, model_type: str = "gradient_boosting"):
+    def __init__(self, model_type: str = "lstm", model_dir: Optional[str] = None):
         """Initialize the forecaster with specified model type.
 
-        What this does: Sets up the ML model with optimal parameters
-        Why gradient boosting: It's very good at finding complex patterns in data
-        How it works: Creates an ensemble of decision trees that work together
+        WHAT: Sets up the forecasting model with pre-trained weights or fallback
+        WHY: Pre-trained LSTM provides better accuracy than on-the-fly models
+        HOW: Loads saved LSTM model, scaler, and calibrator from disk
+        DATA: Model files -> loaded model ready for inference
 
         Args:
-            model_type: Either "gradient_boosting" or "random_forest"
+            model_type: "lstm" (default), "gradient_boosting", or "random_forest"
+            model_dir: Path to saved model directory (default: pipelines/realtime/models/saved_models)
         """
         self.model_type = model_type
         self.model = None
         self.feature_engineer = FeatureEngineer()  # Creates features from data
         self.is_trained = False  # Track whether model has been trained
+        self.shap_explainer = None  # SHAP explainer for feature importance
 
-        # Initialize the ML model based on type
-        if model_type == "random_forest":
+        # WHAT: Set default model directory if not provided
+        # WHY: Centralized location for saved models
+        # HOW: Use pathlib to construct path
+        if model_dir is None:
+            model_dir = Path(__file__).parent / "saved_models"
+        else:
+            model_dir = Path(model_dir)
+
+        self.model_dir = model_dir
+
+        # WHAT: Initialize based on model type
+        # WHY: Support both LSTM and traditional ML models
+        # HOW: Load LSTM if available, otherwise use gradient boosting
+        if model_type == "lstm":
+            # WHAT: Load pre-trained LSTM model and artifacts
+            # WHY: LSTM trained on historical data provides better predictions
+            # HOW: Load Keras model, scaler, calibrator from saved files
+            self._load_lstm_model()
+        elif model_type == "random_forest":
             # Random Forest: Creates many decision trees and averages their predictions
             # Good for: Handling noisy data, resistant to overfitting
             self.model = RandomForestClassifier(
@@ -589,40 +754,433 @@ class ProbabilisticForecaster:
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
-        # Calibrated Classifier: Improves probability estimates
-        # Why: Raw ML models often have poorly calibrated probabilities
-        # Isotonic calibration: Learns to map model scores to true probabilities
-        self.calibrated_model = CalibratedClassifierCV(
-            self.model,
-            method='isotonic',  # Non-parametric calibration
-            cv=3                # Use 3-fold cross-validation
-        )
+        # WHAT: Set up calibrated model for non-LSTM types
+        # WHY: Improve probability estimates for traditional ML
+        # HOW: Wrap model in CalibratedClassifierCV
+        if model_type != "lstm":
+            # Calibrated Classifier: Improves probability estimates
+            # Why: Raw ML models often have poorly calibrated probabilities
+            # Isotonic calibration: Learns to map model scores to true probabilities
+            self.calibrated_model = CalibratedClassifierCV(
+                self.model,
+                method='isotonic',  # Non-parametric calibration
+                cv=3                # Use 3-fold cross-validation
+            )
+
+    def _load_lstm_model(self) -> None:
+        """Load pre-trained LSTM model and artifacts.
+
+        WHAT: Loads LSTM model, scaler, calibrator, and config from disk
+        WHY: Use pre-trained model for inference without retraining
+        HOW: Check if files exist, load using Keras and pickle
+        DATA: Saved files -> loaded model artifacts in memory
+        """
+        # WHAT: Define paths to model artifacts
+        # WHY: Need to load model, scaler, calibrator, and metadata
+        model_path = self.model_dir / "lstm_forecaster.h5"
+        scaler_path = self.model_dir / "scaler.pkl"
+        calibrator_path = self.model_dir / "calibrator.pkl"
+        features_path = self.model_dir / "feature_columns.pkl"
+        config_path = self.model_dir / "config.pkl"
+
+        # WHAT: Check if all required files exist
+        # WHY: Fail fast with clear error if model not trained
+        # HOW: Check each file path exists, raise error with instructions
+        required_files = [model_path, scaler_path, calibrator_path, features_path, config_path]
+        missing_files = [f for f in required_files if not f.exists()]
+
+        if missing_files:
+            # WHAT: Raise error if model files missing
+            # WHY: Cannot run inference without trained model
+            # HOW: Provide clear instructions to user
+            raise RuntimeError(
+                f"LSTM model not found. Missing files: {missing_files}\n"
+                f"Please train the model first by running:\n"
+                f"  python pipelines/realtime/models/train_lstm_forecaster.py"
+            )
+
+        # WHAT: Load Keras model
+        # WHY: Need model for predictions
+        # HOW: Use Keras load_model function
+        # DATA: .h5 file -> Keras model object
+        logger.info(f"Loading LSTM model from {model_path}")
+        self.lstm_model = keras.models.load_model(model_path)
+        self.is_trained = True
+
+        # WHAT: Load scaler
+        # WHY: Need same normalization used during training
+        # HOW: Pickle deserialization
+        # DATA: .pkl file -> StandardScaler object
+        with open(scaler_path, 'rb') as f:
+            self.lstm_scaler = pickle.load(f)
+
+        # WHAT: Load calibrator
+        # WHY: Need to calibrate probabilities during inference
+        # HOW: Pickle deserialization
+        # DATA: .pkl file -> ProbabilityCalibrator object
+        with open(calibrator_path, 'rb') as f:
+            self.lstm_calibrator = pickle.load(f)
+
+        # WHAT: Load feature columns
+        # WHY: Need to know which features and order
+        # HOW: Pickle deserialization
+        # DATA: .pkl file -> list of feature names
+        with open(features_path, 'rb') as f:
+            self.lstm_feature_columns = pickle.load(f)
+
+        # WHAT: Load config
+        # WHY: Need sequence length and other parameters
+        # HOW: Pickle deserialization
+        # DATA: .pkl file -> TrainingConfig object
+        with open(config_path, 'rb') as f:
+            self.lstm_config = pickle.load(f)
+
+        logger.info("LSTM model loaded successfully")
+        logger.info(f"Sequence length: {self.lstm_config.sequence_length}")
+        logger.info(f"Features: {self.lstm_feature_columns}")
+
+        # WHAT: Initialize SHAP explainer for feature importance
+        # WHY: Provide interpretable explanations of model predictions
+        # HOW: Use DeepExplainer with background data from training
+        # DATA: Model + background samples -> SHAP explainer
+        self._initialize_shap_explainer()
 
     def predict(self, market_data: List[Dict], fundamentals: Dict[str, float]) -> ForecastResult:
         """Make probabilistic forecast for a stock.
 
-        What this does: Takes market data and returns prediction with probabilities
-        Why: This is the main function that external code calls to get predictions
-        How:
-        1. Create features from raw data
-        2. Pass features to ML model
-        3. Get probability predictions
-        4. Format results
+        WHAT: Takes market data and returns prediction with probabilities
+        WHY: Main function for getting stock direction predictions
+        HOW: Processes data into sequences, runs through LSTM, calibrates probabilities
+        DATA: Market data dict -> ForecastResult with direction and confidence
 
         Args:
-            market_data: List of daily price/volume data (last 30+ days)
+            market_data: List of daily price/volume data (need 30+ days for LSTM)
             fundamentals: Company metrics (P/E ratio, etc.) - not used yet
 
         Returns:
             ForecastResult with direction, confidence, and daily probabilities
         """
+        # WHAT: Route to appropriate prediction method based on model type
+        # WHY: LSTM requires different processing than traditional ML
+        # HOW: Check model type, call corresponding method
+        if self.model_type == "lstm":
+            return self._predict_lstm(market_data, fundamentals)
+        else:
+            return self._predict_traditional(market_data, fundamentals)
+
+    def _predict_lstm(self, market_data: List[Dict], fundamentals: Dict[str, float]) -> ForecastResult:
+        """Make prediction using pre-trained LSTM model.
+
+        WHAT: Processes market data through LSTM for direction prediction
+        WHY: LSTM model trained on historical data provides accurate forecasts
+        HOW: Convert to DataFrame, calculate indicators, create sequence, predict
+        DATA: Market data -> sequence -> LSTM -> calibrated probabilities
+
+        Args:
+            market_data: List of daily OHLCV data
+            fundamentals: Company fundamentals (not used yet)
+
+        Returns:
+            ForecastResult with LSTM predictions
+        """
+        # WHAT: Check if we have enough data
+        # WHY: LSTM needs sequence_length days of history
+        # HOW: Compare data length to required sequence length
+        if len(market_data) < self.lstm_config.sequence_length:
+            logger.warning(f"Insufficient data for LSTM (need {self.lstm_config.sequence_length}, got {len(market_data)})")
+            return self._trend_based_prediction(market_data)
+
+        # WHAT: Convert market data to DataFrame
+        # WHY: Need pandas for technical indicator calculation
+        # HOW: Create DataFrame from list of dicts
+        # DATA: List of dicts -> pandas DataFrame
+        df = pd.DataFrame(market_data)
+
+        # WHAT: Ensure required columns exist
+        # WHY: Need OHLCV columns for indicators
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        if not all(col in df.columns for col in required_cols):
+            logger.warning(f"Missing required columns, using trend-based prediction")
+            return self._trend_based_prediction(market_data)
+
+        # WHAT: Calculate technical indicators
+        # WHY: LSTM model trained on these features
+        # HOW: Use same calculations as training
+        # DATA: OHLCV -> OHLCV + indicators
+        df['returns'] = df['close'].pct_change()
+        df['rsi'] = self._calculate_rsi_series(df['close'])
+        df['sma_10'] = df['close'].rolling(10).mean()
+        df['sma_20'] = df['close'].rolling(20).mean()
+
+        ema_12 = df['close'].ewm(span=12).mean()
+        ema_26 = df['close'].ewm(span=26).mean()
+        df['macd'] = ema_12 - ema_26
+        df['macd_signal'] = df['macd'].ewm(span=9).mean()
+
+        df['bb_middle'] = df['close'].rolling(20).mean()
+        bb_std = df['close'].rolling(20).std()
+        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
+
+        df['volume_ratio'] = df['volume'] / df['volume'].rolling(10).mean()
+        df['volatility'] = df['returns'].rolling(10).std()
+
+        # WHAT: Extract feature sequence
+        # WHY: LSTM needs fixed-length sequence of features
+        # HOW: Take last sequence_length rows, select feature columns
+        # DATA: DataFrame -> numpy array (sequence_length, n_features)
+        df_clean = df[self.lstm_feature_columns].dropna()
+
+        if len(df_clean) < self.lstm_config.sequence_length:
+            logger.warning("Not enough clean data after indicators, using trend-based prediction")
+            return self._trend_based_prediction(market_data)
+
+        # WHAT: Get most recent sequence
+        # WHY: Predict based on latest data
+        # DATA: Take last sequence_length rows
+        sequence = df_clean.iloc[-self.lstm_config.sequence_length:].values
+
+        # WHAT: Reshape for LSTM input
+        # WHY: LSTM expects (batch_size, sequence_length, n_features)
+        # HOW: Reshape to (1, sequence_length, n_features)
+        # DATA: (seq_len, features) -> (1, seq_len, features)
+        sequence = sequence.reshape(1, self.lstm_config.sequence_length, len(self.lstm_feature_columns))
+
+        # WHAT: Normalize sequence
+        # WHY: Model trained on normalized data
+        # HOW: Use saved scaler from training
+        # DATA: Raw values -> normalized values
+        sequence_2d = sequence.reshape(1, -1)
+        sequence_norm = self.lstm_scaler.transform(sequence_2d)
+        sequence_norm = sequence_norm.reshape(1, self.lstm_config.sequence_length, len(self.lstm_feature_columns))
+
+        # WHAT: Get predictions from LSTM
+        # WHY: Model outputs probability distribution
+        # HOW: Forward pass through network
+        # DATA: Normalized sequence -> raw probabilities (3 classes)
+        raw_proba = self.lstm_model.predict(sequence_norm, verbose=0)
+
+        # WHAT: Calibrate probabilities
+        # WHY: Ensure confidence matches actual accuracy
+        # HOW: Apply calibration learned during training
+        # DATA: Raw probabilities -> calibrated probabilities
+        calibrated_proba = self.lstm_calibrator.calibrate(raw_proba)
+
+        # WHAT: Extract class probabilities
+        # WHY: Need individual class probabilities
+        # DATA: Array -> individual floats
+        prob_down = float(calibrated_proba[0][0])
+        prob_steady = float(calibrated_proba[0][1])
+        prob_up = float(calibrated_proba[0][2])
+
+        # WHAT: Determine direction based on highest probability
+        # WHY: Main prediction is the most likely outcome
+        # HOW: Find argmax of probabilities
+        if prob_up > prob_down and prob_up > prob_steady:
+            direction = "up"
+            confidence = prob_up
+        elif prob_down > prob_up and prob_down > prob_steady:
+            direction = "down"
+            confidence = prob_down
+        else:
+            direction = "neutral"
+            confidence = prob_steady
+
+        # WHAT: Generate daily probability forecasts
+        # WHY: Show how confidence decays over time
+        # HOW: Apply decay factor to probabilities
+        daily_probs = self._generate_daily_probabilities(prob_up, prob_down, prob_steady)
+
+        # WHAT: Calculate 95% confidence horizon
+        # WHY: Show how long prediction remains highly confident
+        horizon_95 = self._calculate_95_horizon(daily_probs)
+
+        # WHAT: Calculate SHAP feature importance
+        # WHY: Explain which features drove this prediction
+        # HOW: Use SHAP explainer on normalized sequence
+        # DATA: Normalized sequence -> feature importance dict
+        feature_importance = self._calculate_shap_importance(sequence_norm)
+
+        return ForecastResult(
+            direction=direction,
+            confidence=confidence,
+            daily_probs=daily_probs,
+            horizon_95=horizon_95,
+            feature_importance=feature_importance,
+            model_metadata={
+                "model_type": "lstm",
+                "probabilities": {
+                    "up": prob_up,
+                    "down": prob_down,
+                    "neutral": prob_steady
+                },
+                "calibrated": True
+            }
+        )
+
+    def _initialize_shap_explainer(self) -> None:
+        """Initialize SHAP explainer for LSTM model.
+
+        WHAT: Creates SHAP explainer for feature importance calculation
+        WHY: SHAP provides mathematically rigorous feature attributions
+        HOW: Load background data and create DeepExplainer
+        DATA: Background samples -> SHAP explainer object
+        """
+        try:
+            # WHAT: Check if background data file exists
+            # WHY: Need representative samples for SHAP baseline
+            background_path = self.model_dir / "shap_background.pkl"
+
+            if not background_path.exists():
+                logger.warning("SHAP background data not found, SHAP explainer disabled")
+                logger.warning(f"Expected file: {background_path}")
+                return
+
+            # WHAT: Load background data
+            # WHY: SHAP needs baseline samples to calculate importance
+            # HOW: Pickle deserialization
+            # DATA: .pkl file -> numpy array of background sequences
+            with open(background_path, 'rb') as f:
+                background_data = pickle.load(f)
+
+            # WHAT: Create SHAP DeepExplainer
+            # WHY: DeepExplainer optimized for neural networks
+            # HOW: Provide model and background data to SHAP
+            # DATA: Model + background -> explainer object
+            logger.info("Initializing SHAP DeepExplainer...")
+            self.shap_explainer = shap.DeepExplainer(
+                self.lstm_model,
+                background_data
+            )
+            logger.info("SHAP explainer initialized successfully")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize SHAP explainer: {e}")
+            logger.warning("Feature importance will use placeholder values")
+
+    def _calculate_shap_importance(self, sequence: np.ndarray) -> Dict[str, float]:
+        """Calculate SHAP feature importance for prediction.
+
+        WHAT: Computes feature importance using SHAP values
+        WHY: Shows which features most influenced the prediction
+        HOW: Run SHAP explainer on input sequence, aggregate by feature
+        DATA: Input sequence -> SHAP values -> importance dict
+
+        Args:
+            sequence: Normalized input sequence (1, seq_len, n_features)
+
+        Returns:
+            Dictionary mapping feature names to importance scores
+            Example: {"rsi": 0.25, "macd": 0.18, "volume_ratio": 0.15, ...}
+        """
+        # WHAT: Check if SHAP explainer available
+        # WHY: Fall back to placeholder if explainer not initialized
+        if self.shap_explainer is None:
+            logger.debug("SHAP explainer not available, using placeholder")
+            return {"lstm_prediction": 1.0}
+
+        try:
+            # WHAT: Calculate SHAP values for input
+            # WHY: Get feature attributions for this specific prediction
+            # HOW: Pass sequence through SHAP explainer
+            # DATA: Input sequence -> SHAP values (1, seq_len, n_features)
+            shap_values = self.shap_explainer.shap_values(sequence)
+
+            # WHAT: Aggregate SHAP values across time steps
+            # WHY: Get overall feature importance (not per timestep)
+            # HOW: Take absolute values and average over sequence length
+            # DATA: (1, seq_len, n_features) -> (n_features,)
+
+            # SHAP values come as list of arrays (one per class)
+            # We take the predicted class's SHAP values
+            if isinstance(shap_values, list):
+                # WHAT: Get predicted class index
+                # WHY: Use SHAP values for the actual prediction
+                predicted_class = np.argmax(self.lstm_model.predict(sequence, verbose=0))
+                class_shap_values = shap_values[predicted_class]
+            else:
+                class_shap_values = shap_values
+
+            # WHAT: Aggregate SHAP values for each feature
+            # HOW: Take mean absolute value across sequence length
+            # DATA: (1, seq_len, n_features) -> (n_features,)
+            feature_importance_array = np.mean(np.abs(class_shap_values[0]), axis=0)
+
+            # WHAT: Normalize importance scores to sum to 1
+            # WHY: Make importance interpretable as percentages
+            # HOW: Divide by sum of all importances
+            total_importance = np.sum(feature_importance_array)
+            if total_importance > 0:
+                feature_importance_array = feature_importance_array / total_importance
+
+            # WHAT: Create dictionary mapping feature names to scores
+            # WHY: Return human-readable feature importance
+            # DATA: Array -> dict with feature names
+            feature_importance = {}
+            for idx, feature_name in enumerate(self.lstm_feature_columns):
+                feature_importance[feature_name] = float(feature_importance_array[idx])
+
+            # WHAT: Sort by importance and keep top 10
+            # WHY: Focus on most influential features
+            # HOW: Sort dict by values descending
+            sorted_importance = dict(
+                sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:10]
+            )
+
+            return sorted_importance
+
+        except Exception as e:
+            logger.warning(f"SHAP calculation failed: {e}")
+            logger.debug("Using placeholder feature importance")
+            return {"lstm_prediction": 1.0}
+
+    def _calculate_rsi_series(self, prices: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate RSI for pandas Series.
+
+        WHAT: Computes RSI indicator for price series
+        WHY: Needed for LSTM feature calculation
+        HOW: Rolling window of gains vs losses
+        DATA: Price series -> RSI series (0-100)
+
+        Args:
+            prices: Pandas Series of closing prices
+            window: RSI calculation window
+
+        Returns:
+            Series of RSI values
+        """
+        delta = prices.diff()
+        gains = delta.clip(lower=0)
+        losses = -delta.clip(upper=0)
+
+        avg_gains = gains.rolling(window=window).mean()
+        avg_losses = losses.rolling(window=window).mean()
+
+        rs = avg_gains / avg_losses
+        rsi = 100 - (100 / (1 + rs))
+
+        return rsi
+
+    def _predict_traditional(self, market_data: List[Dict], fundamentals: Dict[str, float]) -> ForecastResult:
+        """Make prediction using traditional ML models (Random Forest, Gradient Boosting).
+
+        WHAT: Uses gradient boosting or random forest for prediction
+        WHY: Fallback when LSTM not available or for comparison
+        HOW: Feature engineering -> model prediction -> calibration
+        DATA: Market data -> features -> probabilities
+
+        Args:
+            market_data: List of daily price/volume data
+            fundamentals: Company metrics
+
+        Returns:
+            ForecastResult with traditional ML predictions
+        """
         # Check if model has been trained
         # Note: For now, we use a pre-configured model that doesn't need training
         # In production, you'd train on historical data first
         if not self.is_trained:
-            logger.info("Model not explicitly trained, using pre-configured gradient boosting")
-            # We'll create a simple default prediction based on recent trends
-            # This is a temporary solution - ideally train on historical data
+            logger.info("Model not explicitly trained, using trend-based prediction")
             return self._trend_based_prediction(market_data)
 
         # Create features from the market data

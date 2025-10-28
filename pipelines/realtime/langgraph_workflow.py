@@ -9,8 +9,9 @@ from typing import Dict, List, Literal, Optional, TypedDict, Any
 from langgraph.graph import StateGraph
 
 from .agents import (
-    CoordinationAgent, HistoricalAnalysisAgent, SentimentAnalysisAgent, 
-    ExplanationAgent, PredictionAgent, SentimentAgent, SmartMoneyAgent
+    CoordinationAgent, HistoricalAnalysisAgent, SentimentAnalysisAgent,
+    ExplanationAgent, PredictionAgent, SentimentAgent, SmartMoneyAgent,
+    ReflectionAgent
 )
 from .data_adapters import DataService
 from .sp500_data_service import get_sp500_data_service
@@ -35,6 +36,7 @@ class StockAnalysisState(TypedDict, total=False):
     sentiment_result: Optional[Dict]
     comprehensive_sentiment: Dict[str, Dict]  # Sentiment for multiple tickers
     smart_money_data: Optional[Dict]
+    reflection_result: Optional[Dict]  # Quality validation results from ReflectionAgent
     explanation: Optional[str]
     comprehensive_explanation: Optional[str]  # Combined explanation for all tickers
     confidence_level: Literal["high", "medium", "low"]
@@ -52,12 +54,13 @@ def create_stocksense_workflow(
     historical_agent: HistoricalAnalysisAgent,
     sentiment_agent: SentimentAnalysisAgent,
     prediction_agent: PredictionAgent,
+    reflection_agent: ReflectionAgent,
     explanation_agent: ExplanationAgent,
     smart_money_agent: SmartMoneyAgent,
     data_service: Optional[DataService] = None,
     confidence_threshold: float = 0.95,
 ) -> StateGraph:
-    """Compose the enhanced LangGraph workflow for StockSense analysis with coordinating agent."""
+    """Compose the enhanced LangGraph workflow for StockSense analysis with coordinating agent and quality validation."""
 
     builder = StateGraph(StockAnalysisState)
 
@@ -379,6 +382,61 @@ def create_stocksense_workflow(
             state["smart_money_data"] = {"message": "Premium feature"}
         return state
 
+    def run_reflection(state: StockAnalysisState) -> StockAnalysisState:
+        """Validate all agent outputs for quality assurance."""
+        # What: Run ReflectionAgent to validate prediction, sentiment, and data quality
+        # Why: Catch errors and data issues before users see results
+        # How: Call reflection_agent.run() with all analysis results
+        # Data: All agent outputs → validation result → confidence adjustments + warnings
+        reflection_result = reflection_agent.run(
+            prediction=state["prediction_result"],
+            sentiment=state["sentiment_result"],
+            filing=state["smart_money_data"],
+            market_data=state["market_data"],
+            fundamentals=state["fundamentals"]
+        )
+
+        # What: Store reflection results for later use
+        # Why: UI may want to display validation status and issues
+        # How: Add reflection_result to state
+        # Data: Validation dictionary with passed flag, issues, recommendations
+        state["reflection_result"] = reflection_result
+
+        # What: Apply confidence adjustments if validation found issues
+        # Why: Downgrade confidence when quality problems detected
+        # How: Check if validation failed, then downgrade confidence_level and add warnings
+        # Data: reflection_result → state confidence_level + warnings updated
+        if not reflection_result["validation_passed"]:
+            # What: Downgrade confidence level based on issues
+            # Why: Quality problems should reduce user confidence in results
+            # How: Step down one level (high→medium, medium→low)
+            # Data: state["confidence_level"] updated
+            if state["confidence_level"] == "high":
+                state["confidence_level"] = "medium"
+                logger.info("Reflection agent downgraded confidence from high to medium")
+            elif state["confidence_level"] == "medium":
+                state["confidence_level"] = "low"
+                logger.info("Reflection agent downgraded confidence from medium to low")
+
+            # What: Add validation issues to warnings list
+            # Why: Users need to see what quality problems were found
+            # How: Extend warnings list with reflection issues
+            # Data: reflection_result["issues"] → state["warnings"]
+            state["warnings"].extend(reflection_result["issues"])
+
+            # What: Log reflection failure for monitoring
+            # Why: Need visibility into how often validation fails
+            # How: Log at warning level with issue count
+            # Data: Log message with validation details
+            logger.warning(
+                f"Reflection validation failed with {len(reflection_result['issues'])} issues: "
+                f"{', '.join(reflection_result['issues'][:3])}"
+            )
+        else:
+            logger.info("Reflection validation passed - all quality checks OK")
+
+        return state
+
     def build_explanation(state: StockAnalysisState) -> StockAnalysisState:
         """Generate plain English explanation."""
         # What: Craft a narrative that stitches together predictions, news, and smart-money signals
@@ -406,6 +464,7 @@ def create_stocksense_workflow(
     builder.add_node("legacy_predict", run_prediction)
     builder.add_node("legacy_sentiment", run_sentiment)
     builder.add_node("smart_money", run_smart_money)
+    builder.add_node("reflection", run_reflection)  # Quality validation before explanation
     builder.add_node("explain", build_explanation)
 
     # Define enhanced workflow edges
@@ -438,8 +497,9 @@ def create_stocksense_workflow(
     builder.add_edge("coordination", "legacy_predict")
     builder.add_edge("legacy_predict", "legacy_sentiment")
     builder.add_edge("legacy_sentiment", "smart_money")
-    builder.add_edge("smart_money", "explain")
-    
+    builder.add_edge("smart_money", "reflection")  # Quality validation after all analysis
+    builder.add_edge("reflection", "explain")  # Generate explanation after validation
+
     builder.set_finish_point("explain")
 
     return builder
@@ -453,22 +513,24 @@ def run_enhanced_stocksense_analysis(
     historical_agent: HistoricalAnalysisAgent,
     sentiment_agent: SentimentAnalysisAgent,
     prediction_agent: PredictionAgent,
+    reflection_agent: ReflectionAgent,
     explanation_agent: ExplanationAgent,
     smart_money_agent: SmartMoneyAgent,
     data_service: Optional[DataService] = None,
     confidence_threshold: float = 0.95,
 ) -> Dict[str, any]:
-    """Enhanced StockSense workflow with coordinating agent and multiple S&P 500 companies."""
+    """Enhanced StockSense workflow with coordinating agent, quality validation, and multiple S&P 500 companies."""
 
-    # What: Instantiate the LangGraph workflow configured with all enhanced agents
-    # Why: The compiled graph orchestrates data collection, analysis, and coordination automatically
-    # How: Call `create_stocksense_workflow` with the injected agent instances, then compile it
+    # What: Instantiate the LangGraph workflow configured with all enhanced agents including reflection
+    # Why: The compiled graph orchestrates data collection, analysis, quality validation, and coordination
+    # How: Call `create_stocksense_workflow` with all injected agent instances, then compile it
     # Data: Produces a runnable graph object that we can invoke with initial state
     workflow = create_stocksense_workflow(
         coordination_agent=coordination_agent,
         historical_agent=historical_agent,
         sentiment_agent=sentiment_agent,
         prediction_agent=prediction_agent,
+        reflection_agent=reflection_agent,
         explanation_agent=explanation_agent,
         smart_money_agent=smart_money_agent,
         data_service=data_service,
@@ -515,22 +577,28 @@ def run_stocksense_analysis(
     *,
     ticker: str,
     user_tier: str = "basic",
+    coordination_agent: CoordinationAgent,
+    historical_agent: HistoricalAnalysisAgent,
+    sentiment_agent: SentimentAnalysisAgent,
     prediction_agent: PredictionAgent,
-    sentiment_agent: SentimentAgent,
+    reflection_agent: ReflectionAgent,
     explanation_agent: ExplanationAgent,
     smart_money_agent: SmartMoneyAgent,
     data_service: Optional[DataService] = None,
     confidence_threshold: float = 0.95,
 ) -> Dict[str, any]:
-    """Convenience helper that executes the StockSense workflow end-to-end."""
+    """Convenience helper that executes the StockSense workflow end-to-end with quality validation."""
 
-    # What: Build the workflow for a single ticker using the provided agents
-    # Why: Keeps the API handler lightweight by hiding graph wiring logic in one helper
-    # How: Call `create_stocksense_workflow` with the relevant agents and compile it
-    # Data: Produces a runnable object that adheres to the same state contract as the enhanced version
+    # What: Build the workflow for a single ticker using all agents including reflection
+    # Why: Keeps the API handler lightweight while ensuring quality validation
+    # How: Call `create_stocksense_workflow` with all required agents and compile it
+    # Data: Produces a runnable object with complete analysis pipeline including quality checks
     workflow = create_stocksense_workflow(
-        prediction_agent=prediction_agent,
+        coordination_agent=coordination_agent,
+        historical_agent=historical_agent,
         sentiment_agent=sentiment_agent,
+        prediction_agent=prediction_agent,
+        reflection_agent=reflection_agent,
         explanation_agent=explanation_agent,
         smart_money_agent=smart_money_agent,
         data_service=data_service,
@@ -676,9 +744,9 @@ if __name__ == "__main__":
         raise RuntimeError("Could not initialize the OpenAI client for the demo workflow.") from e
     
     from .agents import (
-        build_real_llm_agent, CoordinationAgent, HistoricalAnalysisAgent, 
-        SentimentAnalysisAgent, PredictionAgent, SentimentAgent, 
-        ExplanationAgent, SmartMoneyAgent
+        build_real_llm_agent, CoordinationAgent, HistoricalAnalysisAgent,
+        SentimentAnalysisAgent, PredictionAgent, SentimentAgent,
+        ExplanationAgent, SmartMoneyAgent, ReflectionAgent
     )
 
     llm_wrapper = build_real_llm_agent("stocksense", real_llm)
@@ -691,7 +759,7 @@ if __name__ == "__main__":
     coordination_agent = CoordinationAgent(llm_wrapper, confidence_threshold=0.95)
     historical_agent = HistoricalAnalysisAgent(llm_wrapper)
     sentiment_agent = SentimentAnalysisAgent(llm_wrapper)
-    
+
     # Create legacy agents for compatibility
     # What: Build the traditional single-agent components that certain endpoints still call
     # Why: Ensures backwards-compatible paths continue to function during manual tests
@@ -701,6 +769,13 @@ if __name__ == "__main__":
     legacy_sentiment_agent = SentimentAgent(llm_wrapper)
     explanation_agent = ExplanationAgent(llm_wrapper)
     smart_money_agent = SmartMoneyAgent(llm_wrapper)
+
+    # Create reflection agent for quality validation
+    # What: Instantiate ReflectionAgent with default configuration
+    # Why: Quality validation ensures outputs are reliable before reaching users
+    # How: No LLM needed - uses rule-based validation checks
+    # Data: Validates prediction/sentiment/market data quality
+    reflection_agent = ReflectionAgent()
 
     # Test enhanced workflow with multiple S&P 500 companies
     # What: Execute the multi-ticker workflow to showcase aggregated output
@@ -714,6 +789,7 @@ if __name__ == "__main__":
         historical_agent=historical_agent,
         sentiment_agent=sentiment_agent,
         prediction_agent=prediction_agent,
+        reflection_agent=reflection_agent,
         explanation_agent=explanation_agent,
         smart_money_agent=smart_money_agent,
     )

@@ -17,6 +17,11 @@ import os
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY")
 if not ALPHAVANTAGE_KEY or not ALPHAVANTAGE_KEY.strip():
     raise RuntimeError("Missing Alpha Vantage key. Set environment variable ALPHAVANTAGE_KEY.")
+ALPHAVANTAGE_KEY = "1M71DAVHZE6HBHMJ"
+
+# os.getenv("ALPHAVANTAGE_KEY")
+# if not ALPHAVANTAGE_KEY or not ALPHAVANTAGE_KEY.strip():
+#     raise RuntimeError("Missing Alpha Vantage key. Set environment variable ALPHAVANTAGE_KEY.")
 
 TICKERS   = "AAPL"
 TOPICS    = "technology,earnings"

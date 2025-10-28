@@ -243,9 +243,7 @@ data/smart_money/cache/
 # How: Use scripts/train_forecaster.py to rebuild models
 model/artifacts/
 model/finbert/models--*
-*.pkl
 *.joblib
-*.h5
 *.pth
 *.pt
 *.ckpt
@@ -274,3 +272,5 @@ TEAM_QUICKSTART.md
 SETUP_GUIDE.md
 SETUP.md
 RUNNING_INSTRUCTIONS.md
+ARCHITECTURE_ALIGNMENT.md
+IMPLEMENTATION_STATUS.md

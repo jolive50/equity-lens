@@ -1,4 +1,8 @@
 # StockSense Python Dependencies
+# WHAT: Complete dependency specification for StockSense ML-powered stock analysis platform
+# WHY: Ensures reproducible environment with exact versions for production deployment
+# HOW: Install with `pip install -r requirements.txt`
+# DATA: Organized by functional category for maintainability
 
 # Core Framework
 fastapi==0.104.1
@@ -24,6 +28,9 @@ alpha-vantage>=2.3.1
 transformers==4.36.2
 torch==2.5.1
 scikit-learn==1.3.2
+tensorflow==2.18.0
+keras==3.7.0
+shap==0.44.1
 
 # Database
 sqlalchemy==2.0.23
@@ -51,3 +58,111 @@ mypy==1.7.1
 # Monitoring and Logging
 structlog==23.2.0
 prometheus-client==0.19.0
+# ===== CORE WEB FRAMEWORK =====
+# WHAT: FastAPI async web framework and ASGI server
+# WHY: High-performance API endpoints for real-time stock analysis
+# HOW: FastAPI handles routing/validation, Uvicorn serves the application
+fastapi==0.104.1          # Modern async web framework with automatic OpenAPI docs
+uvicorn[standard]==0.24.0 # ASGI server with WebSocket support
+pydantic==2.7.4           # Data validation and settings management
+
+# ===== AI AGENT ORCHESTRATION =====
+# WHAT: LangGraph and LangChain for multi-agent AI workflows
+# WHY: Orchestrates specialized agents (prediction, sentiment, smart money, explanation)
+# HOW: LangGraph manages agent graph, LangChain provides LLM abstractions
+langchain==0.1.0          # LLM orchestration framework
+langchain-core==0.1.8     # Core abstractions and interfaces
+langgraph==0.0.20         # Graph-based agent workflow engine
+langchain-openai==0.0.2   # OpenAI integration for explanation generation
+
+# ===== DATA PROCESSING =====
+# WHAT: Scientific computing and data manipulation libraries
+# WHY: Process market data, compute technical indicators, feature engineering
+# HOW: Pandas for time series, NumPy for numerical operations
+pandas==2.1.4             # Time series data manipulation and analysis
+numpy==1.26.4             # Numerical computing with n-dimensional arrays
+requests==2.31.0          # HTTP client for API calls
+
+# ===== FINANCIAL DATA SOURCES =====
+# WHAT: Real market data APIs for stocks, fundamentals, and historical prices
+# WHY: StockSense requires actual market data, never synthetic/mock data
+# HOW: yfinance for Yahoo Finance, alpha-vantage for fundamentals
+yfinance>=0.2.28          # Yahoo Finance data downloader
+alpha-vantage>=2.3.1      # Alpha Vantage API client for fundamentals
+
+# ===== MACHINE LEARNING & DEEP LEARNING =====
+# WHAT: TensorFlow for neural networks, transformers for FinBERT, scikit-learn for traditional ML
+# WHY: StockSense uses ML models exclusively (no LLM fallbacks for forecasting/sentiment)
+# HOW: TensorFlow runs FinBERT sentiment, scikit-learn runs gradient boosting forecaster
+# DATA: These packages enable:
+#       - FinBERT sentiment analysis (TensorFlow + transformers)
+#       - Probabilistic stock direction forecasting (scikit-learn)
+#       - Technical indicator feature engineering (NumPy + Pandas)
+transformers==4.36.2      # HuggingFace transformers library for FinBERT
+tensorflow==2.18.0        # TensorFlow deep learning framework (with Keras)
+scikit-learn==1.3.2       # Traditional ML (gradient boosting, random forest, preprocessing)
+
+# ===== DATABASE & PERSISTENCE =====
+# WHAT: PostgreSQL database adapter and ORM
+# WHY: Store user data, watchlists, historical predictions, alerts
+# HOW: SQLAlchemy ORM with Alembic migrations
+sqlalchemy==2.0.23        # SQL toolkit and ORM
+psycopg2-binary==2.9.9    # PostgreSQL database adapter
+alembic==1.13.1           # Database migration tool
+
+# ===== DATA STORAGE =====
+# WHAT: Apache Parquet columnar storage format
+# WHY: Efficient storage for large historical datasets (S&P 500 fundamentals)
+# HOW: PyArrow provides fast read/write for Parquet files
+pyarrow==14.0.1           # Apache Arrow Python bindings
+parquet==1.3.1            # Parquet file format support
+
+# ===== UTILITIES =====
+# WHAT: Environment configuration and HTTP client
+# WHY: Manage API keys securely, handle async HTTP requests
+# HOW: python-dotenv loads .env files, httpx for async HTTP
+python-dotenv==1.0.0      # Load environment variables from .env files
+python-multipart==0.0.6   # Multipart form data parser (for file uploads)
+httpx==0.25.2             # Async HTTP client for API integrations
+
+# ===== DEVELOPMENT & TESTING =====
+# WHAT: Testing framework, code quality tools, type checking
+# WHY: Maintain >80% test coverage, enforce code standards, catch type errors
+# HOW: pytest for testing, black for formatting, flake8 for linting, mypy for types
+pytest==7.4.3             # Testing framework with fixtures and parametrization
+pytest-asyncio==0.21.1    # Async test support for FastAPI endpoints
+pytest-cov==4.1.0         # Coverage reporting plugin
+pytest-mock==3.12.0       # Mocking and patching utilities
+black==23.11.0            # Opinionated code formatter
+flake8==6.1.0             # Linting tool for code quality
+mypy==1.7.1               # Static type checker
+
+# ===== MONITORING & LOGGING =====
+# WHAT: Structured logging and Prometheus metrics
+# WHY: Production observability for debugging and performance monitoring
+# HOW: structlog for structured logs, prometheus-client for metrics export
+structlog==23.2.0         # Structured logging library
+prometheus-client==0.19.0 # Prometheus metrics instrumentation
+
+# ===== VISUALIZATION (OPTIONAL) =====
+# WHAT: Data visualization for model evaluation and debugging
+# WHY: Visualize probability curves, feature importance, technical indicators
+# HOW: Matplotlib for plotting (used in model training scripts)
+# NOTE: Only needed for development/training, not production deployment
+# matplotlib>=3.8.0
+
+# ===== INSTALLATION NOTES =====
+# 1. Create virtual environment: python -m venv venv
+# 2. Activate: source venv/bin/activate (Linux/Mac) or venv\Scripts\activate (Windows)
+# 3. Install dependencies: pip install -r requirements.txt
+# 4. Download FinBERT model: python scripts/download_finbert.py
+# 5. Set up environment variables: cp .env.example .env (then edit with API keys)
+# 6. Run tests: pytest tests/
+# 7. Start API server: uvicorn pipelines.realtime.api:app --reload
+
+# ===== GPU SUPPORT =====
+# TensorFlow 2.18.0 includes GPU support by default
+# For NVIDIA GPUs, ensure CUDA toolkit is installed:
+# - CUDA 12.x (compatible with TensorFlow 2.18)
+# - cuDNN 8.9+ (included with tensorflow package)
+# Verify GPU: python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
