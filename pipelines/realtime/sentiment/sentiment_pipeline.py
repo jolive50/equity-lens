@@ -14,6 +14,9 @@
 # ----------------- Config -----------------
 import os
 
+ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY")
+if not ALPHAVANTAGE_KEY or not ALPHAVANTAGE_KEY.strip():
+    raise RuntimeError("Missing Alpha Vantage key. Set environment variable ALPHAVANTAGE_KEY.")
 ALPHAVANTAGE_KEY = "1M71DAVHZE6HBHMJ"
 
 # os.getenv("ALPHAVANTAGE_KEY")
@@ -67,6 +70,8 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from textblob import TextBlob
 from requests.adapters import HTTPAdapter, Retry
+from pipelines.realtime.sentiment.agent import run_sentiment_agent
+
 
 os.environ["TRANSFORMERS_NO_TF"] = "1"
 os.environ["USE_TF"] = "0"
