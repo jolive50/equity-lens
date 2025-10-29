@@ -244,28 +244,56 @@ class NewsSentimentProcessor:
     2. Prioritize financial news (earnings, revenue, etc.)
     3. Analyze sentiment of each article with FinBERT
     4. Aggregate to get overall sentiment and trend
+    5. Store articles in VectorStore for semantic search (if enabled)
+    6. Retrieve similar historical articles for context (if enabled)
 
     Think of this as a news analyst who:
     - Reads all articles about a stock
     - Filters out noise
     - Summarizes overall market sentiment
+    - Remembers similar historical patterns
     """
 
-    def __init__(self, analyzer: Optional[FinBERTSentimentAnalyzer] = None):
-        """Initialize with optional FinBERT analyzer.
+    def __init__(
+        self,
+        analyzer: Optional[FinBERTSentimentAnalyzer] = None,
+        *,
+        vector_store: Optional[any] = None,
+        enable_similarity_search: bool = True
+    ):
+        """Initialize with optional FinBERT analyzer and VectorStore.
 
-        What this does: Creates processor with FinBERT analyzer
-        Why optional: Allows dependency injection for testing
-        How: Uses provided analyzer or creates new one
+        What this does: Creates processor with FinBERT analyzer and optional VectorStore
+        Why optional VectorStore: Enables semantic search and historical context augmentation
+        How: Uses provided dependencies or creates new ones (dependency injection pattern)
 
         Args:
             analyzer: Optional pre-configured FinBERT analyzer
+            vector_store: Optional VectorStore instance for semantic search
+            enable_similarity_search: Whether to search for similar historical articles
         """
-        # Use provided analyzer or create new one
-        # This is dependency injection pattern (SOLID principle)
+        # WHAT: Use provided analyzer or create new one
+        # WHY: Dependency injection pattern (SOLID principle)
+        # HOW: Check if analyzer provided, otherwise instantiate new FinBERTSentimentAnalyzer
+        # DATA: analyzer → FinBERTSentimentAnalyzer instance
         self.analyzer = analyzer or FinBERTSentimentAnalyzer()
 
-    def process_news_articles(self, articles: List[Dict]) -> Dict[str, any]:
+        # WHAT: Store VectorStore reference for semantic search
+        # WHY: Enables finding similar historical articles for context
+        # HOW: Store reference if provided, None otherwise
+        # DATA: vector_store → VectorStore instance or None
+        self.vector_store = vector_store
+        self.enable_similarity_search = enable_similarity_search and vector_store is not None
+
+        if self.enable_similarity_search:
+            logger.info("VectorStore integration enabled for sentiment analysis")
+
+    def process_news_articles(
+        self,
+        articles: List[Dict],
+        *,
+        ticker: Optional[str] = None
+    ) -> Dict[str, any]:
         """Process a list of news articles and return aggregated sentiment.
 
         What this does: Main function that converts raw articles to sentiment summary
@@ -276,10 +304,13 @@ class NewsSentimentProcessor:
         3. Run FinBERT on all articles (batch processing)
         4. Calculate averages and determine overall sentiment
         5. Detect trend (improving/declining/stable)
+        6. Store articles in VectorStore for future similarity search (if enabled)
+        7. Retrieve similar historical articles for context (if enabled)
 
         Args:
             articles: List of article dictionaries
                      Each has: {title: str, content: str, timestamp: str, source: str}
+            ticker: Optional stock ticker symbol for VectorStore storage
 
         Returns:
             Sentiment summary dictionary with:
@@ -346,7 +377,62 @@ class NewsSentimentProcessor:
         # Are things getting better or worse over time?
         trend = self._calculate_trend(sentiment_scores)
 
-        return {
+        # === STEP 5: VectorStore Integration (Optional) ===
+        # WHAT: Store articles in VectorStore and retrieve similar historical articles
+        # WHY: Enables semantic search and provides historical context for better analysis
+        # HOW: Store current articles, then search for similar past articles
+        # DATA: articles + sentiment scores → VectorStore → similar historical articles
+        similar_articles = []
+        if self.enable_similarity_search and ticker:
+            try:
+                # WHAT: Store analyzed articles in VectorStore with metadata
+                # WHY: Build knowledge base for future similarity searches
+                # HOW: Prepare articles with sentiment metadata, call vector_store.add_news_articles
+                # DATA: articles with {title, content, sentiment, score} → VectorStore embeddings
+                articles_to_store = []
+                for article, score in zip(articles, sentiment_scores):
+                    articles_to_store.append({
+                        "title": article.get("title", ""),
+                        "content": article.get("content", ""),
+                        "timestamp": article.get("timestamp", datetime.now().isoformat()),
+                        "source": article.get("source", "unknown"),
+                        "sentiment": current_sentiment,
+                        "sentiment_score": sentiment_score,
+                        "sentiment_breakdown": {
+                            "positive": float(score["positive"]),
+                            "negative": float(score["negative"]),
+                            "neutral": float(score["neutral"])
+                        }
+                    })
+
+                stored_count = self.vector_store.add_news_articles(
+                    ticker=ticker,
+                    articles=articles_to_store
+                )
+                logger.info(f"Stored {stored_count} articles in VectorStore for {ticker}")
+
+                # WHAT: Search for similar historical articles
+                # WHY: Provide context by showing similar past situations
+                # HOW: Use top headline as query, search VectorStore
+                # DATA: query text → VectorStore semantic search → similar articles with distances
+                if headlines:
+                    query_text = headlines[0]  # Use top headline as search query
+                    similar_articles = self.vector_store.search_similar_news(
+                        query=query_text,
+                        ticker=ticker,
+                        n_results=5
+                    )
+                    logger.info(f"Found {len(similar_articles)} similar historical articles for {ticker}")
+
+            except Exception as e:
+                # WHAT: Log error but don't fail sentiment analysis
+                # WHY: VectorStore is enhancement, not requirement
+                # HOW: Log warning and continue with empty similar_articles
+                logger.warning(f"VectorStore integration failed for {ticker}: {e}")
+                similar_articles = []
+
+        # === STEP 6: Return Comprehensive Sentiment Result ===
+        result = {
             "current": current_sentiment,
             "score": sentiment_score,
             "trend": trend,
@@ -358,6 +444,15 @@ class NewsSentimentProcessor:
                 "neutral": avg_neutral
             }
         }
+
+        # WHAT: Add similar historical articles if found
+        # WHY: Provides historical context for better decision making
+        # HOW: Append similar_articles to result dictionary
+        # DATA: similar_articles = [{title, content, distance, metadata}]
+        if similar_articles:
+            result["similar_articles"] = similar_articles
+
+        return result
 
     def _filter_relevant_articles(self, articles: List[Dict]) -> List[Dict]:
         """Filter articles to prioritize financial relevance and recency.
@@ -602,17 +697,32 @@ class NewsSentimentProcessor:
             return "stable"  # No significant change
 
 
-def create_sentiment_analyzer() -> NewsSentimentProcessor:
-    """Factory function to create sentiment analyzer.
+def create_sentiment_analyzer(
+    *,
+    vector_store: Optional[any] = None,
+    enable_similarity_search: bool = True
+) -> NewsSentimentProcessor:
+    """Factory function to create sentiment analyzer with optional VectorStore.
 
-    What this does: Creates and returns a new sentiment processor
+    What this does: Creates and returns a new sentiment processor with optional VectorStore
     Why factory pattern: Centralizes object creation, makes testing easier
-    How: Simply instantiates NewsSentimentProcessor (which internally creates FinBERT)
+    How: Instantiates NewsSentimentProcessor with optional VectorStore dependency
+
+    Args:
+        vector_store: Optional VectorStore instance for semantic search capabilities
+        enable_similarity_search: Whether to enable similarity search (requires vector_store)
 
     Returns:
         Configured NewsSentimentProcessor ready to use
     """
-    return NewsSentimentProcessor()
+    # WHAT: Create NewsSentimentProcessor with optional VectorStore
+    # WHY: VectorStore enables semantic search and historical context
+    # HOW: Pass vector_store as keyword argument to NewsSentimentProcessor
+    # DATA: vector_store (optional) → NewsSentimentProcessor with enhanced capabilities
+    return NewsSentimentProcessor(
+        vector_store=vector_store,
+        enable_similarity_search=enable_similarity_search
+    )
 
 
 # Test code (runs when this file is executed directly)

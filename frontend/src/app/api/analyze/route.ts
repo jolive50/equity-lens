@@ -22,7 +22,9 @@ export async function POST(request: Request) {
 		});
 		const data = await upstream.json().catch(() => ({}));
 		return NextResponse.json(data, { status: upstream.status });
-	} catch (error: any) {
-		return NextResponse.json({ detail: error?.message || "Analysis failed" }, { status: 500 });
+	} catch (error: unknown) {
+		let message = "Analysis failed";
+		if (error instanceof Error) message = error.message;
+		return NextResponse.json({ detail: message }, { status: 500 });
 	}
 }

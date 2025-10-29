@@ -5,7 +5,7 @@ StockSense is an end-to-end platform that turns raw market information into clea
 ## Core Capabilities
 
 - **Probabilistic forecasts** with calibrated 95% confidence horizons
-- **Sentiment intelligence** using FinBERT over live news streams
+- **Sentiment intelligence** using FinBERT over live news streams, with semantic search and historical context augmentation via VectorStore
 - **Smart money tracing** across institutional filings, insider trades, and congressional disclosures
 - **Tier-aware explanations** so basic users see essentials while premium users receive deeper metrics and recommended actions
 - **Pluggable data adapters** (Alpha Vantage, Tiingo, Finnhub, Yahoo Finance) that follow SOLID/OOP principles for maintainability
@@ -91,7 +91,7 @@ npm run dev
 | ---------- | ------------------------------------------------ | --------------------------------------------- |
 | Frontend   | Next.js (App Router), TypeScript, Radix UI       | User experience, dashboards, client auth      |
 | API        | FastAPI, Pydantic, LangGraph workflow            | Request validation, agent orchestration       |
-| Agents     | LangGraph-driven multi-agent prediction pipeline | Forecasting, sentiment, explanation, alerts   |
+| Agents     | LangGraph-driven multi-agent prediction pipeline, VectorStore integration | Forecasting, sentiment (with semantic search & historical context), explanation, alerts   |
 | Data       | Adapter + repository pattern                     | Vendor integrations and durable storage       |
 | ML Assets  | Forecaster models and training utilities         | Time-series forecasting with risk metrics     |
 
@@ -197,6 +197,11 @@ Adjust if you proxy the API elsewhere.
 - **[Implementation Status](docs/IMPLEMENTATION_STATUS.md)** - Current progress and roadmap
 - **[Data Inventory](docs/DATA_INVENTORY.md)** - Complete list of available datasets and metrics
 - **[Technical Documentation](docs/resources/TECHNICAL_DOCUMENTATION_COLLEGE_LEVEL.md)** - Architecture deep-dive
+- **SentimentAgent & VectorStore Integration:**
+   - SentimentAgent now stores all processed news articles in VectorStore for semantic search and historical context.
+   - Semantic similarity search enables finding related news for a ticker using embeddings.
+   - Sentiment analysis is enhanced by blending current and historical sentiment scores from similar news articles.
+   - See `pipelines/realtime/agents.py` and `pipelines/realtime/storage/vector_store.py` for implementation details.
 
 ## Contributing
 

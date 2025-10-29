@@ -51,7 +51,7 @@ export default function Home() {
   const [ticker, setTicker] = useState("AAPL");
   const [userTier, setUserTier] = useState<"basic" | "registered" | "premium">("basic");
   const [watchlist, setWatchlist] = useState<string[]>([]);
-  const [batch, setBatch] = useState<{ user_tier: string; count: number; items: Array<{ ticker: string; as_of: string; direction: string; confidence: number; horizon_days: number; score: number; sentiment: any }>} | null>(null);
+  const [batch, setBatch] = useState<{ user_tier: string; count: number; items: Array<{ ticker: string; as_of: string; direction: string; confidence: number; horizon_days: number; score: number; sentiment: { current: string; score: number; trend: string; headlines: string[] } | null }> } | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,8 +125,10 @@ export default function Home() {
           setHistory(hist?.items || []);
         } catch {}
       }
-    } catch (err: any) {
-      setError(err.message || 'Analysis failed');
+    } catch (err: unknown) {
+      let message = 'Analysis failed';
+      if (err instanceof Error) message = err.message;
+      setError(message);
       setRetryCount(prev => prev + 1);
     } finally {
       setLoading(false);
@@ -151,8 +153,10 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || 'Batch failed');
       setBatch(data);
-    } catch (err: any) {
-      setError(err?.message || 'Batch failed');
+    } catch (err: unknown) {
+      let message = 'Batch failed';
+      if (err instanceof Error) message = err.message;
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -306,7 +310,7 @@ export default function Home() {
                   id="addWatchTicker"
                   placeholder="Add ticker"
                   size="2"
-                  onKeyDown={async (e: any) => {
+                  onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
                     if (e.key === 'Enter') {
                       const val = String(e.currentTarget.value || '').toUpperCase().replace(/[^A-Z0-9\.\-]/g, '');
                       if (val) {
@@ -399,7 +403,7 @@ export default function Home() {
                 {userTier === 'premium' ? (
                   <Flex gap="2" align="center" wrap="wrap">
                     <TextField.Root id="alertTicker" placeholder="Ticker" size="2" aria-label="Alert ticker" value={alertTicker} onChange={(e) => setAlertTicker(e.target.value.toUpperCase().replace(/[^A-Z0-9\.\-]/g, ''))} />
-                    <Select.Root value={alertCondition} onValueChange={(v: any) => setAlertCondition(v)}>
+                    <Select.Root value={alertCondition} onValueChange={(v: "prob_down_gte" | "prob_up_gte" | "confidence_gte") => setAlertCondition(v)}>
                       <Select.Trigger id="alertCondition" aria-label="Alert condition" />
                       <Select.Content>
                         <Select.Item value="prob_down_gte">Prob Down ≥</Select.Item>

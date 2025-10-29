@@ -20,7 +20,7 @@ from __future__ import annotations
 import json  # For parsing JSON data
 import logging  # For recording what happens (debugging and monitoring)
 import os  # For accessing environment variables (API keys, settings)
-from typing import Dict, Optional, List, Iterable  # Type hints for better code clarity
+from typing import Dict, Optional, List, Iterable, Any  # Type hints for better code clarity
 
 # dotenv: Loads environment variables from .env file
 # Why: We don't want to hard-code API keys in our code (security risk)
@@ -40,8 +40,11 @@ from .api_keys import get_available_api_keys  # Centralised API-key registry
 from .agents import (  # AI agents that do specific tasks
     ExplanationAgent,  # Explains predictions in plain English
     PredictionAgent,  # Predicts stock direction
-    SentimentAgent,  # Analyzes news sentiment
+    SentimentAgent,  # Analyzes news sentiment (single ticker, legacy)
+    SentimentAnalysisAgent,  # Analyzes news sentiment (multi-ticker, enhanced)
     SmartMoneyAgent,  # Tracks institutional investors
+    CoordinationAgent,  # Coordinates multi-agent synthesis
+    HistoricalAnalysisAgent,  # Analyzes historical data
     build_openai_llm,  # Creates OpenAI connection
 )
 from .repository import (  # Data storage classes
@@ -189,7 +192,7 @@ class BatchAnalysisResponse(BaseModel):
 # Pattern: Singleton pattern (lazy initialization)
 
 _data_service: Optional[DataService] = None  # Fetches market data
-_agents: Optional[Dict[str, any]] = None  # AI agents (prediction, sentiment, etc.)
+_agents: Optional[Dict[str, Any]] = None  # AI agents (prediction, sentiment, etc.)
 _watchlists: Optional[WatchlistRepository] = None  # User watchlists storage
 _history: Optional[HistoryRepository] = None  # Analysis history storage
 _alerts: Optional[AlertsRepository] = None  # User alerts storage
@@ -252,7 +255,7 @@ def get_data_service() -> DataService:
     return _data_service
 
 
-def get_agents() -> Dict[str, any]:
+def get_agents() -> Dict[str, Any]:
     """Get or create the AI agent instances.
 
     What: Returns AI agents that perform specific analysis tasks
@@ -270,37 +273,32 @@ def get_agents() -> Dict[str, any]:
 
     # If agents haven't been created yet, create them
     if _agents is None:
-        # Try to use OpenAI's GPT model for better quality
-        # If no API key is available, raise a configuration error so the caller knows to set it
         try:
-            # build_openai_llm creates a connection to OpenAI's API
-            # "gpt-4o-mini" is a cost-effective model (cheaper than full GPT-4)
             llm = build_openai_llm("gpt-4o-mini")
             logger.info("Using OpenAI GPT-4o-mini for agents")
         except ValueError as e:
-            # What: Surface a clear operational error when no OpenAI key is configured.
-            # Why: The platform must not fabricate LLM outputs without a real model behind them.
-            # How: Log the issue and raise a RuntimeError so the API can respond with an actionable message.
-            # Data: Includes the original exception message for operator troubleshooting.
             logger.error(f"OpenAI LLM unavailable: {e}")
             raise RuntimeError(
                 "OPENAI_API_KEY is required to run StockSense analysis. "
                 "Set the environment variable before invoking the API."
             ) from e
 
-        # Create all agent instances with the LLM
-        # Each agent has specialized prompts and logic for its task
+        # Initialize enhanced workflow agents
+        from .reflection import ReflectionAgent
         _agents = {
-            "prediction": PredictionAgent(llm),  # Forecasts stock direction
-            "sentiment": SentimentAgent(llm),  # Analyzes news sentiment
-            "explanation": ExplanationAgent(llm),  # Explains results simply
-            "smart_money": SmartMoneyAgent(llm),  # Tracks big investors
+            "prediction": PredictionAgent(llm),
+            "sentiment": SentimentAnalysisAgent(llm, use_finbert=True),
+            "explanation": ExplanationAgent(llm),
+            "smart_money": SmartMoneyAgent(llm),
+            "coordination": CoordinationAgent(llm),
+            "historical": HistoricalAnalysisAgent(llm),
+            "reflection": ReflectionAgent(),
         }
 
     return _agents
 
 
-def get_repos() -> Dict[str, any]:
+def get_repos() -> Dict[str, Any]:
     """Get or create repository instances for data storage.
 
     What: Returns repositories that save/load user data (watchlists, history, alerts)
@@ -466,10 +464,13 @@ async def analyze_stock(request: AnalysisRequest):
         # - Generates explanation
         # - Checks smart money (premium only)
         result = run_stocksense_analysis(
-            ticker=request.ticker.upper(),  # Convert to uppercase (AAPL not aapl)
+            ticker=request.ticker.upper(),
             user_tier=request.user_tier,
-            prediction_agent=agents["prediction"],
+            coordination_agent=agents["coordination"],
+            historical_agent=agents["historical"],
             sentiment_agent=agents["sentiment"],
+            prediction_agent=agents["prediction"],
+            reflection_agent=agents["reflection"],
             explanation_agent=agents["explanation"],
             smart_money_agent=agents["smart_money"],
             data_service=data_service,
@@ -821,39 +822,35 @@ async def analyze_batch(request: BatchAnalysisRequest):
     data_service = get_data_service()
     agents = get_agents()
 
-    # Analyze each ticker
     items: List[BatchAnalysisItem] = []
     for t in deduped:
         try:
-            # Run full analysis for this ticker
             result = run_stocksense_analysis(
                 ticker=t,
                 user_tier=request.user_tier,
-                prediction_agent=agents["prediction"],
+                coordination_agent=agents["coordination"],
+                historical_agent=agents["historical"],
                 sentiment_agent=agents["sentiment"],
+                prediction_agent=agents["prediction"],
+                reflection_agent=agents["reflection"],
                 explanation_agent=agents["explanation"],
                 smart_money_agent=agents["smart_money"],
                 data_service=data_service,
             )
-
-            # Extract compact summary (don't need full explanation for batch)
-            # Why: Reduces response size and processing time
             horizon_days = int(result["forecast"]["horizon_95"].get("days", 0)) if result["forecast"].get("horizon_95") else 0
             items.append(
                 BatchAnalysisItem(
                     ticker=result["ticker"],
                     as_of=result["as_of"],
-                    direction=result["forecast"]["direction"],  # up/down/neutral
+                    direction=result["forecast"]["direction"],
                     confidence=float(result["forecast"]["confidence"]),
-                    horizon_days=horizon_days,  # How long we're confident
+                    horizon_days=horizon_days,
                     score=float(result["sentiment"].get("score", 0.0)),
                     sentiment=result["sentiment"],
                 )
             )
         except Exception as e:
             logger.error(f"Batch analyze failed for {t}: {e}")
-            # Skip failed ticker rather than failing whole batch
-            # Why: Better UX - user gets partial results even if one stock fails
             continue
 
     return BatchAnalysisResponse(
@@ -863,7 +860,8 @@ async def analyze_batch(request: BatchAnalysisRequest):
     )
 
 
-def _iter_predictions_csv(rows: Iterable[Dict[str, any]]) -> Iterable[str]:
+from typing import Any
+def _iter_predictions_csv(rows: Iterable[Dict[str, Any]]) -> Iterable[str]:
     """Generator that yields CSV rows for streaming.
 
     What: Converts prediction data to CSV format, one row at a time
@@ -922,7 +920,7 @@ async def export_predictions_csv(
     agents = get_agents()
 
     # Collect prediction data for all tickers
-    aggregated: List[Dict[str, any]] = []
+    aggregated: List[Dict[str, Any]] = []
     for sym in symbols:
         try:
             # Run analysis for this ticker
@@ -931,6 +929,9 @@ async def export_predictions_csv(
                 user_tier=user_tier,
                 prediction_agent=agents["prediction"],
                 sentiment_agent=agents["sentiment"],
+                coordination_agent=agents["coordination"],
+                historical_agent=agents["historical"],
+                reflection_agent=agents["reflection"],
                 explanation_agent=agents["explanation"],
                 smart_money_agent=agents["smart_money"],
                 data_service=data_service,

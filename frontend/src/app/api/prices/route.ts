@@ -97,8 +97,10 @@ export async function GET(request: Request) {
     const points = extractDateClose(headers, rows, variant);
     const tail = points.slice(-limit);
     return NextResponse.json({ ticker, source: sourceUsed, count: tail.length, items: tail });
-  } catch (err: any) {
-    return NextResponse.json({ ticker, source, error: err?.message || "Failed" }, { status: 200 });
+  } catch (err: unknown) {
+    let message = "Failed";
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ ticker, source, error: message }, { status: 200 });
   }
 }
 

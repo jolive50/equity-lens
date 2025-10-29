@@ -1,7 +1,19 @@
-"""Sentiment utilities."""
+"""Sentiment analysis module for financial news.
 
-"""Realtime sentiment processing scaffolding."""
+WHAT: Provides FinBERT-based sentiment analysis with optional VectorStore integration
+WHY: Financial news sentiment drives short-term stock price movements
+HOW: Uses fine-tuned FinBERT model for accurate financial sentiment classification
+DATA: News articles → FinBERT → sentiment scores + trend + historical context
+"""
 
-from .finbert import FinBERTConfig, score_with_finbert
+from .finbert import (
+    FinBERTSentimentAnalyzer,
+    NewsSentimentProcessor,
+    create_sentiment_analyzer
+)
 
-__all__ = ["FinBERTConfig", "score_with_finbert"]
+__all__ = [
+    "FinBERTSentimentAnalyzer",
+    "NewsSentimentProcessor",
+    "create_sentiment_analyzer"
+]

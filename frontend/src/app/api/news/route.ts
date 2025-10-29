@@ -22,8 +22,10 @@ export async function GET(request: Request) {
       try { return JSON.parse(l); } catch { return null; }
     }).filter(Boolean);
     return NextResponse.json({ source, ticker, count: items.length, items });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "Not found", source, ticker, items: [] }, { status: 200 });
+  } catch (err: unknown) {
+    let message = "Not found";
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ error: message, source, ticker, items: [] }, { status: 200 });
   }
 }
 

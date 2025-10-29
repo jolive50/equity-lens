@@ -36,7 +36,7 @@ export function LoadingCard({ message = "Analyzing stock data...", submessage }:
 }
 
 interface LoadingSpinnerProps {
-  size?: "1" | "2" | "3" | "4";
+  size?: "1" | "2" | "3";
   className?: string;
 }
 

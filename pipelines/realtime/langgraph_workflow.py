@@ -113,7 +113,7 @@ def create_stocksense_workflow(
         # Data: Outputs a nested dict keyed by ticker with `market_data` and `fundamentals` sections
         # Use S&P 500 data service
         sp500_service = get_sp500_data_service()
-        comprehensive_data = sp500_service.get_comprehensive_sp500_data(tickers)
+        comprehensive_data = sp500_service.get_multiple_tickers_data(tickers)
         
         # What: Store ticker-by-ticker price histories inside the workflow state
         # Why: Historical, sentiment, and prediction agents all expect quick access to past prices
@@ -132,6 +132,12 @@ def create_stocksense_workflow(
             for ticker in tickers
         }
         
+        # What: Store complete comprehensive data for all tickers
+        # Why: Downstream functions like collect_comprehensive_news need access to news_data
+        # How: Save the full comprehensive_data dict to state
+        # Data: Dict with keys: ticker -> {market_data, fundamentals, news_data, data_quality}
+        state["comprehensive_data"] = comprehensive_data
+
         # What: Keep backwards compatibility for parts of the app that only know about a single ticker
         # Why: The FastAPI endpoints and some UI components still expect `market_data` / `fundamentals` roots
         # How: Copy the primary ticker's info into the legacy slots while leaving the new structures intact
@@ -140,22 +146,23 @@ def create_stocksense_workflow(
         primary_ticker = state["ticker"]
         state["market_data"] = comprehensive_data[primary_ticker]["market_data"]
         state["fundamentals"] = comprehensive_data[primary_ticker]["fundamentals"]
-        
+
         return state
 
     def collect_comprehensive_news(state: StockAnalysisState) -> StockAnalysisState:
         """Collect news for all tickers."""
         tickers = state["tickers"]
-        
-        # What: Gather recent headlines for each company under review
-        # Why: Sentiment agent and explanation pipeline rely on up-to-date article context
-        # How: Loop through the ticker list and ask the shared service for per-symbol news arrays
+
+        # What: Extract news data that was already fetched in collect_sp500_data
+        # Why: Avoid duplicate API calls - news was already retrieved with market data
+        # How: Access comprehensive_data from state and extract news_data for each ticker
         # Data: Builds a dict keyed by ticker with lists of news article dictionaries inside
-        # Use S&P 500 service for comprehensive news
-        sp500_service = get_sp500_data_service()
+        comprehensive_data = state.get("comprehensive_data", {})
         comprehensive_news = {}
         for ticker in tickers:
-            comprehensive_news[ticker] = sp500_service.get_news_data(ticker)
+            # Extract news_data from the already-fetched comprehensive data
+            ticker_data = comprehensive_data.get(ticker, {})
+            comprehensive_news[ticker] = ticker_data.get("news_data", [])
         
         # What: Cache the multi-ticker news bundle on the state object for later steps
         # Why: Avoids repeating the service call and keeps intermediate results inspectable
