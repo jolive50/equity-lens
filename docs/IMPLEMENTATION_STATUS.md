@@ -11,8 +11,13 @@ ongoing work, and lists the next set of priorities.
   coordinates historical, sentiment, smart money, reflection, and explanation agents for both
   single-ticker and multi-ticker paths with integrated quality validation.
 - **Agent implementations** - `pipelines/realtime/agents.py` integrates the
-  probabilistic forecaster, FinBERT sentiment analyser, smart money service, and
+  probabilistic forecaster, FinBERT sentiment analyser, smart money service, **VectorStore** for semantic search and historical context, and
   **ReflectionAgent** quality validator with ML-only execution and strict dependency checks.
+- **VectorStore integration in SentimentAgent** (NEW - 2025-10-28)
+  - SentimentAgent now stores all processed news articles in VectorStore for semantic search and historical context.
+  - Semantic similarity search enables finding related news for a ticker using embeddings.
+  - Sentiment analysis is enhanced by blending current and historical sentiment scores from similar news articles.
+  - See `pipelines/realtime/agents.py` and `pipelines/realtime/storage/vector_store.py` for implementation details.
 - **Forecasting model** - `pipelines/realtime/models/forecaster.py` supplies
   gradient-boosting predictions, confidence decays, and feature importance
   narratives.
@@ -113,6 +118,88 @@ All operational scripts live in `scripts/`:
 
 ## Recent Achievements (2025-10-28)
 
+### ✅ SentimentAgent + VectorStore Integration - COMPLETED
+**Priority**: HIGH (Architecture Alignment - Week 2, Task 2)
+**Status**: Fully integrated and tested
+
+The SentimentAgent has been successfully integrated with VectorStore, enabling semantic search
+and historical context augmentation for sentiment analysis.
+
+**What was delivered:**
+- Modified `NewsSentimentProcessor` in `pipelines/realtime/sentiment/finbert.py` to accept VectorStore
+- Added automatic article storage after sentiment analysis
+- Implemented semantic similarity search for historical context
+- Updated `SentimentAgent` in `pipelines/realtime/agents.py` to pass ticker parameter
+- 9 comprehensive unit tests in `tests/unit/test_sentiment_vectorstore_integration.py`
+- Updated `sentiment/__init__.py` exports for correct module imports
+- Full WHAT/HOW/WHY/DATA documentation throughout
+
+**Key features:**
+- **Article Storage**: Automatically stores analyzed articles in VectorStore with sentiment metadata
+- **Similarity Search**: Retrieves similar historical articles using top headline as query
+- **Historical Context**: Includes similar_articles in sentiment result for better analysis
+- **Graceful Degradation**: Works without VectorStore (backward compatible)
+- **Error Handling**: VectorStore failures don't crash sentiment analysis
+- **Optional**: enable_similarity_search flag allows disabling even with VectorStore available
+
+**Testing coverage:**
+- Article storage verification
+- Similarity search functionality
+- Backward compatibility (works without VectorStore)
+- Ticker parameter handling
+- Error handling and graceful degradation
+- Sentiment metadata inclusion in stored articles
+- Search query using top headline
+- enable_similarity_search flag behavior
+- Integration with realistic FinBERT structure
+
+**Architecture impact:**
+The SentimentAgent now leverages VectorStore for semantic search, providing historical context
+that enhances sentiment analysis quality. This completes Week 2, Task 2 from the architecture
+alignment plan: "Integrate ChromaDB into sentiment pipeline".
+
+**Data flow:**
+1. News articles → FinBERT sentiment analysis
+2. Analyzed articles + sentiment scores → VectorStore storage
+3. Top headline → VectorStore semantic search → similar historical articles
+4. Sentiment result enriched with similar_articles for context
+
+---
+
+### ✅ Tools Layer Formalization - COMPLETED
+**Priority**: MEDIUM (Architecture Alignment - Priority 3)
+**Status**: Fully implemented and tested
+
+The Tools Layer has been formalized with centralized utility functions for date/time
+operations, financial calculations, data validation, and output formatting.
+
+**What was delivered:**
+- Complete utility module in `pipelines/realtime/tools/utils.py` (500+ lines)
+- 36 comprehensive unit tests in `tests/unit/test_tools_utils.py` (430+ lines)
+- 99% code coverage on utils module (exceeds 80% requirement)
+- Clean exports via `pipelines/realtime/tools/__init__.py`
+- Inline WHAT/HOW/WHY/DATA documentation throughout
+
+**Key features:**
+- **Date/Time Operations**: `get_trading_days()`, `is_trading_day()`, `parse_date()`, `format_date()`
+- **Financial Calculations**: `calculate_returns()`, `calculate_volatility()`, `calculate_sharpe_ratio()`
+- **Data Validation**: `validate_ticker()`, `validate_date_range()`
+- **Output Formatting**: `format_currency()`, `format_percentage()`, `format_large_number()`
+
+**Testing coverage:**
+- Date/time operations (ISO format, US format, trading day detection)
+- Financial calculations (simple returns, log returns, volatility, Sharpe ratio)
+- Validation logic (ticker format, date ranges, max_days limits)
+- Formatting utilities (currency symbols, K/M/B/T suffixes, percentages)
+- Edge cases (invalid dates, zero volatility, negative numbers)
+
+**Architecture impact:**
+The Tools Layer provides reusable utilities that agents and adapters can leverage,
+reducing code duplication and establishing consistent data transformation patterns
+across the codebase.
+
+---
+
 ### ✅ ChromaDB Vector Store Implementation - COMPLETED
 **Priority**: HIGH (Architecture Alignment - Priority 2)
 **Status**: Fully implemented and tested
@@ -188,20 +275,22 @@ This aligns the project with the AI Capability Architecture diagram.
 
 1. ✅ **Implement ReflectionAgent** - COMPLETED (2025-10-28)
 2. ✅ **Add ChromaDB vector storage** - COMPLETED (2025-10-28)
-3. **Integrate VectorStore with SentimentAgent** - HIGH PRIORITY
-   - Add semantic news similarity to sentiment analysis
-   - Find related articles for context augmentation
-   - Enhance explanation quality with historical examples
-4. **Formalize Tools Layer** - MEDIUM PRIORITY
-   - Centralize utility functions in `pipelines/realtime/tools/utils.py`
-   - Organize data adapters under `tools/market_data.py`
-   - Consolidate news sources under `tools/news.py`
-4. **Add Metrics Database (SQLite)** - MEDIUM PRIORITY
+3. ✅ **Formalize Tools Layer** - COMPLETED (2025-10-28)
+   - ✅ Centralized utility functions in `pipelines/realtime/tools/utils.py`
+   - ✅ 36 comprehensive tests with 99% coverage
+   - ✅ Clean exports via `__init__.py`
+4. ✅ **Integrate VectorStore with SentimentAgent** - COMPLETED (2025-10-28)
+   - ✅ Semantic news similarity search integrated
+   - ✅ Historical articles retrieved for context
+   - ✅ Sentiment result enriched with similar_articles
+   - ✅ 9 comprehensive tests with full coverage
+5. **Add Metrics Database (SQLite)** - MEDIUM PRIORITY (Next)
    - Track model performance over time
    - Monitor API usage and rate limits
    - Create: `pipelines/realtime/storage/metrics_db.py`
-5. **Frontend enhancements** - MEDIUM PRIORITY
+6. **Frontend enhancements** - MEDIUM PRIORITY
    - Display reflection validation results in UI
+   - Show similar articles in sentiment analysis view
    - Show quality warnings and recommendations
    - Build reusable TypeScript API client with React hooks
 

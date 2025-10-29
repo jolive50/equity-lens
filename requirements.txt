@@ -98,8 +98,9 @@ alpha-vantage>=2.3.1      # Alpha Vantage API client for fundamentals
 #       - FinBERT sentiment analysis (TensorFlow + transformers)
 #       - Probabilistic stock direction forecasting (scikit-learn)
 #       - Technical indicator feature engineering (NumPy + Pandas)
-transformers==4.36.2      # HuggingFace transformers library for FinBERT
-tensorflow==2.18.0        # TensorFlow deep learning framework (with Keras)
+transformers>=4.36.2      # HuggingFace transformers library for FinBERT
+tensorflow>=2.20.0        # TensorFlow deep learning framework (version 2.20+ with Keras 3 support)
+tf-keras>=2.20.0          # Backward-compatible Keras package for transformers library compatibility
 scikit-learn==1.3.2       # Traditional ML (gradient boosting, random forest, preprocessing)
 
 # ===== DATABASE & PERSISTENCE =====

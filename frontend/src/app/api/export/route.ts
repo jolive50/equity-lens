@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 function getApiBase(): string {
-	const env = process.env.NEXT_PUBLIC_API_BASE || process.env.API_BASE_URL;
+	const env = process.env.NEXT_PUBLIC_BACKEND_API_BASE || process.env.BACKEND_API_BASE;
 	return (env && env.replace(/\/$/, "")) || "http://localhost:8000";
 }
 

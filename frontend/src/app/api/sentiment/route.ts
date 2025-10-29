@@ -40,8 +40,10 @@ export async function GET(request: Request) {
     const lines = raw.split(/\r?\n/).filter(Boolean);
     const tail = lines.slice(-limit).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     return NextResponse.json({ ticker, items: tail });
-  } catch (err: any) {
-    return NextResponse.json({ ticker, items: [], error: err?.message });
+  } catch (err: unknown) {
+    let message = "Unknown error";
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ ticker, items: [], error: message });
   }
 }
 

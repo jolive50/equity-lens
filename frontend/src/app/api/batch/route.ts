@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 function getApiBase(): string {
-	const env = process.env.NEXT_PUBLIC_API_BASE || process.env.API_BASE_URL;
+	const env = process.env.NEXT_PUBLIC_BACKEND_API_BASE || process.env.BACKEND_API_BASE;
 	return (env && env.replace(/\/$/, "")) || "http://localhost:8000";
 }
 
@@ -20,8 +20,10 @@ export async function POST(request: Request) {
 		});
 		const data = await res.json().catch(() => ({}));
 		return NextResponse.json(data, { status: res.status });
-	} catch (err: any) {
-		return NextResponse.json({ detail: err?.message || "Batch failed" }, { status: 500 });
+	} catch (err: unknown) {
+		let message = "Batch failed";
+		if (err instanceof Error) message = err.message;
+		return NextResponse.json({ detail: message }, { status: 500 });
 	}
 }
 

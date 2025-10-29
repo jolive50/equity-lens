@@ -1,0 +1,60 @@
+# Auto detect text files and normalize line endings to LF
+* text=auto
+
+# Source code - force LF
+*.py text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Documentation - force LF
+*.md text eol=lf
+*.txt text eol=lf
+*.rst text eol=lf
+
+# Configuration files - force LF
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+*.env text eol=lf
+.env.* text eol=lf
+
+# Web files - force LF
+*.html text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.svg text eol=lf
+
+# Shell scripts - force LF
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows batch files - force CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files - don't normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.pkl binary
+*.h5 binary
+*.joblib binary
+*.zip binary
+*.tar.gz binary
+
+# Model files - don't normalize
+*.pb binary
+*.ckpt binary
+*.pth binary
+*.pt binary

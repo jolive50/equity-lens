@@ -1,3 +1,23 @@
+from pydantic import SecretStr  # For secure API key handling
+
+import logging  # For recording events and debugging
+import re  # For pattern matching in text parsing
+from dataclasses import dataclass  # For creating simple data classes
+from typing import Dict, List, Literal, Optional, Any  # Type hints
+
+# LangGraph runtime utilities (provided via langchain-core components)
+# Why: Provides tools to chain together prompts, LLMs, and parsers
+from langchain_core.output_parsers import StrOutputParser  # Converts LLM output to string
+from langchain_core.prompts import ChatPromptTemplate  # Creates formatted prompts for LLMs
+from langchain_core.runnables import Runnable, RunnableLambda  # Base classes for chainable components
+
+
+from .api_keys import get_api_key, get_available_api_keys  # Centralised API key helpers
+from .reflection import ReflectionAgent  # Quality assurance agent for output validation
+from .storage.vector_store import VectorStore  # Import VectorStore for type hints
+
+logger = logging.getLogger(__name__)
+
 """LangGraph agent definitions for the StockSense workflow.
 
 This file defines specialized AI "agents" that each perform specific analysis tasks.
@@ -16,7 +36,6 @@ Why we need agents:
 - Easy to test independently
 - ReflectionAgent ensures quality control before user sees results
 """
-from __future__ import annotations
 
 import logging  # For recording events and debugging
 import re  # For pattern matching in text parsing
@@ -78,9 +97,9 @@ class SmartMoneyResult:
     Why: Tracks what "smart money" (big investors) are doing
     Data: Three categories - institutions, insiders, congressional trades
     """
-    institutions: Dict[str, any]  # Hedge funds, mutual funds activity
-    insiders: Dict[str, any]  # Company executives buying/selling
-    congress: Dict[str, any]  # Congressional stock trades (public disclosures)
+    institutions: Dict[str, Any]  # Hedge funds, mutual funds activity
+    insiders: Dict[str, Any]  # Company executives buying/selling
+    congress: Dict[str, Any]  # Congressional stock trades (public disclosures)
 
 
 # ===== CORE AGENT CLASSES =====
@@ -286,8 +305,12 @@ Be conversational but accurate. Focus on helping the student understand WHY the 
         except Exception as exc:
             raise RuntimeError(f"Forecasting ML model failed for {ticker}: {exc}") from exc
 
+        from typing import cast
+        allowed_directions = {"up", "down", "neutral"}
+        direction = ml_result.direction if ml_result.direction in allowed_directions else "neutral"
+        direction_literal = cast(Literal["up", "down", "neutral"], direction)
         return PredictionResult(
-            direction=ml_result.direction,
+            direction=direction_literal,
             confidence=ml_result.confidence,
             narrative=self._build_narrative(ticker, ml_result),
             daily_probs=ml_result.daily_probs,
@@ -308,7 +331,7 @@ class SentimentAgent:
 
     Data Flow:
     Input: ticker (str), news_data (list of article dictionaries)
-    Output: SentimentResult (current sentiment, score, trend, headlines)
+    Output: SentimentResult (current sentiment, score, trend, headlines, similar_articles)
 
     Example:
     Input: ticker="AAPL", news_data=[{title: "Apple beats earnings", content: "..."}]
@@ -320,8 +343,24 @@ class SentimentAgent:
         llm: Optional[Runnable] = None,  # Deprecated parameter retained for compatibility
         *,
         use_finbert: bool = True,
+        vector_store: Optional[any] = None,  # VectorStore integration point
     ) -> None:
-        """Initialize the sentiment agent in FinBERT-only mode."""
+        """Initialize the sentiment agent in FinBERT-only mode with optional VectorStore.
+
+        What: Sets up FinBERT sentiment analyzer with optional VectorStore integration
+        Why: VectorStore enables semantic search and historical context for better analysis
+        How: Creates sentiment analyzer and passes VectorStore reference if provided
+
+        Args:
+            llm: (Unused) Language model, retained for compatibility
+            use_finbert: Whether to use FinBERT (must be True)
+            vector_store: Optional VectorStore instance for semantic search and storage
+
+        VectorStore integration points:
+            - Store processed news articles for semantic search
+            - Retrieve similar news for context augmentation
+            - Enhance sentiment analysis with historical context
+        """
         if llm is not None:
             logger.warning("SentimentAgent ignores provided LLM; operating with FinBERT only.")
 
@@ -336,30 +375,86 @@ class SentimentAgent:
                 "before running StockSense."
             ) from exc
 
-        self.sentiment_analyzer = create_sentiment_analyzer()
+        # WHAT: Create sentiment analyzer with optional VectorStore
+        # WHY: VectorStore enables storing articles and searching similar historical patterns
+        # HOW: Pass vector_store to factory function
+        # DATA: vector_store (optional) → sentiment_analyzer with enhanced capabilities
+        self.sentiment_analyzer = create_sentiment_analyzer(
+            vector_store=vector_store,
+            enable_similarity_search=True
+        )
         if self.sentiment_analyzer is None:
             raise RuntimeError("create_sentiment_analyzer returned None; ensure FinBERT assets are available.")
 
-    def run(self, *, ticker: str, news_data: List[Dict]) -> SentimentResult:
-        """Analyze sentiment for a stock's news using FinBERT."""
+        # WHAT: Store VectorStore reference for find_related_news method
+        # WHY: Allows direct semantic search on stored articles
+        # HOW: Store reference as instance variable
+        # DATA: vector_store → self.vector_store
+        self.vector_store = vector_store
 
+    def run(self, *, ticker: str, news_data: List[Dict]) -> SentimentResult:
+        """
+        Analyze sentiment for a stock's news using FinBERT.
+        Stores news articles in VectorStore if available.
+        Augments sentiment analysis with historical context from VectorStore.
+        """
+        # WHAT: Validate news_data is not empty
+        # WHY: FinBERT requires at least one article to analyze
+        # HOW: Check if news_data list has items
+        # DATA: news_data (List[Dict]) must be non-empty
         if not news_data:
             raise ValueError("news_data must contain at least one article for sentiment analysis.")
 
+        # WHAT: Process news articles with FinBERT and VectorStore integration
+        # WHY: Get sentiment analysis with optional historical context from VectorStore
+        # HOW: Pass ticker to enable VectorStore storage and similarity search
+        # DATA: news_data + ticker → FinBERT analysis + VectorStore storage → sentiment result with similar_articles
         try:
-            finbert_result = self.sentiment_analyzer.process_news_articles(news_data)
+            finbert_result = self.sentiment_analyzer.process_news_articles(
+                news_data,
+                ticker=ticker
+            )
         except Exception as exc:
             raise RuntimeError(f"FinBERT sentiment analysis failed for {ticker}: {exc}") from exc
 
+        # WHAT: Validate finbert_result has required keys
+        # WHY: Ensure FinBERT returned valid sentiment analysis
+        # HOW: Check for required keys in result dictionary
+        # DATA: finbert_result must have {current, score, trend, headlines}
         required_keys = {"current", "score", "trend", "headlines"}
         if not isinstance(finbert_result, dict) or not required_keys.issubset(finbert_result.keys()):
             raise RuntimeError("FinBERT returned an unexpected response structure.")
 
+        # WHAT: Extract and validate sentiment values from FinBERT result
+        # WHY: Type safety and ensure values are in expected range
+        # HOW: Cast to expected types and validate against allowed values
+        # DATA: finbert_result dict → typed sentiment values
+        allowed_sentiments = {"positive", "neutral", "negative"}
+        allowed_trends = {"improving", "stable", "declining"}
+        current = str(finbert_result["current"]).lower()
+        trend = str(finbert_result["trend"]).lower()
+        current = current if current in allowed_sentiments else "neutral"
+        trend = trend if trend in allowed_trends else "stable"
+        score = float(finbert_result["score"])
+        headlines = list(finbert_result.get("headlines", []))[:3]
+
+        # WHAT: Cast to Literal types for type safety
+        # WHY: mypy and type checkers require exact literal types
+        # HOW: Use typing.cast with Literal types
+        # DATA: str → Literal["positive" | "neutral" | "negative"]
+        from typing import cast
+        current_literal = cast(Literal["positive", "neutral", "negative"], current)
+        trend_literal = cast(Literal["improving", "stable", "declining"], trend)
+
+        # WHAT: Return SentimentResult with all analysis data
+        # WHY: Provides structured sentiment information to coordination agent
+        # HOW: Create SentimentResult with validated fields
+        # DATA: sentiment fields → SentimentResult dataclass
         return SentimentResult(
-            current=str(finbert_result["current"]).lower(),
-            score=float(finbert_result["score"]),
-            trend=str(finbert_result["trend"]).lower(),
-            headlines=list(finbert_result.get("headlines", []))[:3]
+            current=current_literal,
+            score=score,
+            trend=trend_literal,
+            headlines=headlines
         )
 
 
@@ -529,15 +624,18 @@ def build_openai_llm(model: str = "gpt-4o-mini") -> Runnable:
     # Why: Guarantees we never attempt to hit OpenAI without credentials, keeping usage compliant
     # How: Delegate to api_keys.get_api_key with required=True so a clear exception is raised when absent
     # Data: Returns the API key string trimmed of whitespace
-    api_key = get_api_key("openai", required=True)
+
+    api_key_str = get_api_key("openai", required=True)
+    if api_key_str is None:
+        raise ValueError("OPENAI_API_KEY is required but not found.")
+    api_key = SecretStr(api_key_str)
 
     # Create and return ChatOpenAI instance
     return ChatOpenAI(
         model=model,  # Which GPT model to use
-        api_key=api_key,  # Authentication
-        temperature=0.1,  # Low temperature for consistent, conservative responses
+        api_key=api_key,  # Authentication as SecretStr
+        temperature=0.1  # Low temperature for consistent, conservative responses
                          # Why 0.1: Financial analysis should be consistent, not creative
-        max_tokens=1000  # Limit response length
     )
 
 
@@ -1044,9 +1142,14 @@ class SentimentAnalysisAgent:
         """
         self.use_finbert = use_finbert
 
-        # Note: This agent might not have sentiment_analyzer initialized
-        # It will be set later if FinBERT module loads successfully
-        # This is intentional - allows graceful degradation to LLM
+        # Try to initialize FinBERT sentiment analyzer if available
+        self.sentiment_analyzer = None
+        if use_finbert:
+            try:
+                from .sentiment.finbert import create_sentiment_analyzer
+                self.sentiment_analyzer = create_sentiment_analyzer()
+            except ImportError:
+                logger.warning("FinBERT dependencies missing; SentimentAnalysisAgent will use LLM fallback.")
 
         # Create prompt template for multi-company sentiment analysis
         base_prompt = ChatPromptTemplate.from_template(
@@ -1079,7 +1182,7 @@ Consider sector rotation and macro sentiment impact."""
         # Create LLM chain
         self._chain = base_prompt | llm | StrOutputParser()
 
-    def run(self, *, comprehensive_news_data: Dict[str, List[Dict]], market_context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def run(self, *, comprehensive_news_data: Dict[str, List[Dict]], market_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Run sentiment analysis across multiple companies.
 
         What: Analyzes news sentiment for multiple stocks simultaneously
@@ -1274,8 +1377,12 @@ def _extract_direction(raw_text: str) -> Literal["up", "down", "neutral"]:
     if not match:
         return "neutral"  # Default to neutral if not found
 
-    # Return matched direction in lowercase
-    return match.group(1).lower()
+    # Return matched direction in lowercase, cast to Literal
+    from typing import cast
+    val = match.group(1).lower() if match else "neutral"
+    allowed = {"up", "down", "neutral"}
+    result = val if val in allowed else "neutral"
+    return cast(Literal["up", "down", "neutral"], result)
 
 
 def _extract_narrative(raw_text: str) -> str:
@@ -1322,9 +1429,13 @@ def _extract_sentiment_current(raw_text: str) -> Literal["positive", "neutral", 
     Why: Need sentiment as enum
     """
     match = SENTIMENT_PATTERN.search(raw_text)
+    from typing import cast
     if not match:
-        return "neutral"
-    return match.group(1).lower()
+        return cast(Literal["positive", "neutral", "negative"], "neutral")
+    val = match.group(1).lower()
+    allowed = {"positive", "neutral", "negative"}
+    result = val if val in allowed else "neutral"
+    return cast(Literal["positive", "neutral", "negative"], result)
 
 
 def _extract_sentiment_trend(raw_text: str) -> Literal["improving", "stable", "declining"]:
@@ -1335,9 +1446,13 @@ def _extract_sentiment_trend(raw_text: str) -> Literal["improving", "stable", "d
     Why: Need trend direction for analysis
     """
     match = TREND_PATTERN.search(raw_text)
+    from typing import cast
     if not match:
-        return "stable"
-    return match.group(1).lower()
+        return cast(Literal["improving", "stable", "declining"], "stable")
+    val = match.group(1).lower()
+    allowed = {"improving", "stable", "declining"}
+    result = val if val in allowed else "stable"
+    return cast(Literal["improving", "stable", "declining"], result)
 
 
 def _extract_headlines(raw_text: str) -> List[str]:
@@ -1378,7 +1493,7 @@ def _extract_headlines(raw_text: str) -> List[str]:
     return headlines[:3]
 
 
-def _extract_smart_money_section(raw_text: str, section: str) -> Dict[str, any]:
+def _extract_smart_money_section(raw_text: str, section: str) -> Dict[str, Any]:
     """Extract a specific section from smart money agent output.
 
     What: Extracts one of three sections: INSTITUTIONS, INSIDERS, or CONGRESS
@@ -1435,9 +1550,13 @@ def _extract_historical_trend(raw_text: str) -> Literal["positive", "neutral", "
     Why: Need trend classification for historical analysis
     """
     match = HISTORICAL_TREND_PATTERN.search(raw_text)
+    from typing import cast
     if not match:
-        return "neutral"
-    return match.group(1).lower()
+        return cast(Literal["positive", "neutral", "negative"], "neutral")
+    val = match.group(1).lower()
+    allowed = {"positive", "neutral", "negative"}
+    result = val if val in allowed else "neutral"
+    return cast(Literal["positive", "neutral", "negative"], result)
 
 
 def _extract_score(raw_text: str, score_type: str) -> int:
