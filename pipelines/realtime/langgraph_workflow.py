@@ -27,6 +27,7 @@ class StockAnalysisState(TypedDict, total=False):
     user_tier: Literal["basic", "premium"]
     market_data: Optional[Dict]
     comprehensive_market_data: Dict[str, Dict]  # Data for multiple tickers
+    comprehensive_data: Dict[str, Dict]  # Complete data bundle for each ticker (market_data + fundamentals + news_data)
     news_data: List[Dict]
     comprehensive_news_data: Dict[str, List[Dict]]  # News for multiple tickers
     fundamentals: Dict[str, float]
@@ -483,18 +484,22 @@ def create_stocksense_workflow(
     builder.add_edge("validate", "sp500_data")
     builder.add_edge("sp500_data", "comprehensive_news")
     
-    # What: Trigger both historical and sentiment working agents at the same time
-    # Why: Parallelizing independent tasks shortens response time for users
-    # How: Add separate edges from the news collection step to each working agent node
-    # Data: Each branch receives the same state object and writes back its own results
+    # What: Run historical analysis after collecting news
+    # Why: Need to analyze historical patterns first
+    # How: Add edge from news collection to historical analysis
+    # Data: Historical agent gets comprehensive news data
     builder.add_edge("comprehensive_news", "historical_working")
-    builder.add_edge("comprehensive_news", "sentiment_working")
-    
-    # What: Funnel both working-agent outputs into the coordinator for synthesis
-    # Why: The coordinator needs perspectives from every specialist before drafting guidance
-    # How: Connect each working node to the coordination node so both transitions feed the same step
-    # Data: The state now includes historical and sentiment results when the coordinator runs
-    builder.add_edge("historical_working", "coordination")
+
+    # What: Run sentiment analysis after historical analysis
+    # Why: Sequential execution to avoid LangGraph parallel execution issues
+    # How: Chain sentiment after historical
+    # Data: Both analyses complete before coordination
+    builder.add_edge("historical_working", "sentiment_working")
+
+    # What: Feed sentiment results into coordinator for synthesis
+    # Why: The coordinator needs perspectives from both specialists
+    # How: Connect sentiment node to coordination node
+    # Data: The state includes both historical and sentiment results
     builder.add_edge("sentiment_working", "coordination")
     
     # What: Continue the legacy single-ticker pipeline once the new coordination step finishes
@@ -636,7 +641,7 @@ def run_stocksense_analysis(
             "daily_probs": result_state["daily_probs"]
         },
         "metrics": _format_metrics(result_state["fundamentals"]),
-        "sentiment": result_state["sentiment_result"],
+        "sentiment": _format_sentiment_for_frontend(result_state["sentiment_result"], ticker),
         "smart_money": result_state["smart_money_data"],
         "explanation": result_state["explanation"],
         "warnings": result_state["warnings"],
@@ -646,6 +651,49 @@ def run_stocksense_analysis(
             f"Last updated: {datetime.utcnow().isoformat()}Z"
         ]
     }
+
+
+def _format_sentiment_for_frontend(sentiment_result: Dict[str, Any], ticker: str) -> Dict[str, Any]:
+    """Transform multi-ticker sentiment format to single-ticker frontend format.
+
+    WHAT: Converts sentiment result to match frontend expectations
+    WHY: Frontend expects {current, score, trend, headlines} but multi-ticker format differs
+    HOW: Extract ticker-specific data or use overall sentiment
+    DATA: sentiment_result (multi-ticker format) -> frontend format
+    """
+    # WHAT: Check if we have sector_analysis with ticker-specific data
+    # WHY: Multi-ticker sentiment has per-ticker details in sector_analysis
+    # HOW: Look for sector_analysis[ticker], fallback to overall sentiment
+    if "sector_analysis" in sentiment_result and ticker in sentiment_result["sector_analysis"]:
+        ticker_sentiment = sentiment_result["sector_analysis"][ticker]
+        return {
+            "current": ticker_sentiment.get("current", "neutral"),
+            "score": ticker_sentiment.get("score", 0.5),
+            "trend": ticker_sentiment.get("trend", "stable"),
+            "headlines": ticker_sentiment.get("headlines", [])[:3],  # Top 3
+            "article_count": ticker_sentiment.get("article_count", 0),
+            "sentiment_breakdown": ticker_sentiment.get("sentiment_breakdown", {
+                "positive": 0.33,
+                "negative": 0.33,
+                "neutral": 0.34
+            })
+        }
+    else:
+        # WHAT: Fallback to overall sentiment if no ticker-specific data
+        # WHY: Handle cases where sentiment analysis returns simplified format
+        # HOW: Use overall_sentiment as current, map sentiment_score to 0-1 range
+        return {
+            "current": sentiment_result.get("overall_sentiment", "neutral"),
+            "score": sentiment_result.get("sentiment_score", 50) / 100.0,  # Convert 0-100 to 0-1
+            "trend": sentiment_result.get("trend_direction", "stable"),
+            "headlines": sentiment_result.get("headlines", [])[:3],
+            "article_count": sentiment_result.get("total_articles", 0),
+            "sentiment_breakdown": {
+                "positive": 0.33,
+                "negative": 0.33,
+                "neutral": 0.34
+            }
+        }
 
 
 def _format_metrics(fundamentals: Dict[str, float]) -> Dict[str, Dict]:

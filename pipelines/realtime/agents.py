@@ -628,12 +628,11 @@ def build_openai_llm(model: str = "gpt-4o-mini") -> Runnable:
     api_key_str = get_api_key("openai", required=True)
     if api_key_str is None:
         raise ValueError("OPENAI_API_KEY is required but not found.")
-    api_key = SecretStr(api_key_str)
 
-    # Create and return ChatOpenAI instance
+    # Pass the API key as a plain string (not SecretStr)
     return ChatOpenAI(
         model=model,  # Which GPT model to use
-        api_key=api_key,  # Authentication as SecretStr
+        api_key=api_key_str,  # Authentication as string
         temperature=0.1  # Low temperature for consistent, conservative responses
                          # Why 0.1: Financial analysis should be consistent, not creative
     )
@@ -1182,15 +1181,23 @@ Consider sector rotation and macro sentiment impact."""
         # Create LLM chain
         self._chain = base_prompt | llm | StrOutputParser()
 
-    def run(self, *, comprehensive_news_data: Dict[str, List[Dict]], market_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Run sentiment analysis across multiple companies.
+    def run(self, *, ticker: Optional[str] = None, news_data: Optional[List[Dict]] = None, comprehensive_news_data: Optional[Dict[str, List[Dict]]] = None, market_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Run sentiment analysis for single or multiple companies.
 
-        What: Analyzes news sentiment for multiple stocks simultaneously
+        What: Analyzes news sentiment for one or multiple stocks
         How:
-        1. Try FinBERT first (if available) for sector-wide analysis
-        2. Fall back to LLM if FinBERT unavailable
-        3. Extract themes from headlines
-        4. Return comprehensive sentiment analysis
+        1. If ticker + news_data provided: single-ticker analysis (legacy mode)
+        2. If comprehensive_news_data provided: multi-ticker analysis
+        3. Try FinBERT first (if available) for sector-wide analysis
+        4. Fall back to LLM if FinBERT unavailable
+        5. Extract themes from headlines
+        6. Return comprehensive sentiment analysis
+
+        Args:
+            ticker: Single ticker symbol (for single-ticker mode)
+            news_data: List of news articles (for single-ticker mode)
+            comprehensive_news_data: Dictionary mapping tickers to news (for multi-ticker mode)
+            market_context: Optional market context data
 
         Data Flow:
         Receives: comprehensive_news_data = {
@@ -1210,6 +1217,20 @@ Consider sector rotation and macro sentiment impact."""
             ...
         }
         """
+
+        # === STEP 0: Handle Single-Ticker Mode (Legacy Compatibility) ===
+        # WHAT: Convert single-ticker call to multi-ticker format
+        # WHY: Workflow has both single and multi-ticker paths that need to work
+        # HOW: If ticker + news_data provided, wrap them in comprehensive_news_data dict
+        # DATA: ticker + news_data → comprehensive_news_data = {ticker: news_data}
+        if ticker and news_data and not comprehensive_news_data:
+            # Single-ticker mode: convert to multi-ticker format
+            comprehensive_news_data = {ticker: news_data}
+            logger.info(f"SentimentAnalysisAgent: Single-ticker mode for {ticker} with {len(news_data)} articles")
+
+        # Validate that we have data to analyze
+        if not comprehensive_news_data:
+            raise ValueError("Either (ticker + news_data) or comprehensive_news_data must be provided")
 
         # === STRATEGY 1: Try FinBERT Sector Analysis ===
         # Why: FinBERT can analyze multiple companies' sentiment simultaneously

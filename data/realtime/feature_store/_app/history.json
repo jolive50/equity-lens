@@ -1,1 +1,53 @@
-{}
+{
+  "demo": [
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T06:37:40.552376Z",
+      "direction": "neutral",
+      "confidence": 0.38477110862731934,
+      "score": 0.0
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T06:39:41.230621Z",
+      "direction": "neutral",
+      "confidence": 0.38477110862731934,
+      "score": 0.0
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T06:39:55.455171Z",
+      "direction": "neutral",
+      "confidence": 0.38477110862731934,
+      "score": 0.0
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T06:40:55.736280Z",
+      "direction": "neutral",
+      "confidence": 0.38477110862731934,
+      "score": 0.0
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T06:42:09.518229Z",
+      "direction": "neutral",
+      "confidence": 0.38477110862731934,
+      "score": 0.9082425236701965
+    },
+    {
+      "ticker": "MSFT",
+      "as_of": "2025-10-29T06:46:21.866552Z",
+      "direction": "neutral",
+      "confidence": 0.3935278356075287,
+      "score": 0.8815916776657104
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T07:05:30.425442Z",
+      "direction": "neutral",
+      "confidence": 0.38477110862731934,
+      "score": 0.9082425832748413
+    }
+  ]
+}

@@ -40,8 +40,7 @@ from .api_keys import get_available_api_keys  # Centralised API-key registry
 from .agents import (  # AI agents that do specific tasks
     ExplanationAgent,  # Explains predictions in plain English
     PredictionAgent,  # Predicts stock direction
-    SentimentAgent,  # Analyzes news sentiment (single ticker, legacy)
-    SentimentAnalysisAgent,  # Analyzes news sentiment (multi-ticker, enhanced)
+    SentimentAnalysisAgent,  # Analyzes news sentiment for multiple tickers
     SmartMoneyAgent,  # Tracks institutional investors
     CoordinationAgent,  # Coordinates multi-agent synthesis
     HistoricalAnalysisAgent,  # Analyzes historical data
@@ -57,7 +56,8 @@ from .repository import (  # Data storage classes
 
 # Load environment variables from .env file
 # This reads things like OPENAI_API_KEY, ALPHA_VANTAGE_API_KEY, etc.
-load_dotenv()
+# Explicitly specify the .env path relative to this file for reliability
+load_dotenv(dotenv_path=os.path.abspath(os.path.join(os.path.dirname(__file__), '../../.env')))
 
 # Configure logging to show informational messages
 # Why: Helps us debug issues and monitor the application
@@ -274,8 +274,8 @@ def get_agents() -> Dict[str, Any]:
     # If agents haven't been created yet, create them
     if _agents is None:
         try:
-            llm = build_openai_llm("gpt-4o-mini")
-            logger.info("Using OpenAI GPT-4o-mini for agents")
+            llm = build_openai_llm("gpt-3.5-turbo")
+            logger.info("Using OpenAI GPT-3.5-turbo for agents")
         except ValueError as e:
             logger.error(f"OpenAI LLM unavailable: {e}")
             raise RuntimeError(
