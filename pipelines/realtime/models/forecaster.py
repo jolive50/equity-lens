@@ -1023,7 +1023,7 @@ class ProbabilisticForecaster:
 
         WHAT: Creates SHAP explainer for feature importance calculation
         WHY: SHAP provides mathematically rigorous feature attributions
-        HOW: Load background data and create DeepExplainer
+        HOW: Load background data and create GradientExplainer (TF 2.x compatible)
         DATA: Background samples -> SHAP explainer object
         """
         try:
@@ -1043,14 +1043,24 @@ class ProbabilisticForecaster:
             with open(background_path, 'rb') as f:
                 background_data = pickle.load(f)
 
-            # WHAT: Create SHAP DeepExplainer
-            # WHY: DeepExplainer optimized for neural networks
+            # WHAT: Create SHAP GradientExplainer instead of DeepExplainer
+            # WHY: GradientExplainer is more compatible with TensorFlow 2.x operations
             # HOW: Provide model and background data to SHAP
             # DATA: Model + background -> explainer object
-            logger.info("Initializing SHAP DeepExplainer...")
-            self.shap_explainer = shap.DeepExplainer(
+            logger.info("Initializing SHAP GradientExplainer...")
+
+            # WHAT: Use smaller background sample for GradientExplainer
+            # WHY: GradientExplainer is computationally expensive, limit to 50 samples
+            # HOW: Take first 50 samples from background data
+            # DATA: Background data -> reduced sample
+            if len(background_data) > 50:
+                background_sample = background_data[:50]
+            else:
+                background_sample = background_data
+
+            self.shap_explainer = shap.GradientExplainer(
                 self.lstm_model,
-                background_data
+                background_sample
             )
             logger.info("SHAP explainer initialized successfully")
 
@@ -1074,16 +1084,17 @@ class ProbabilisticForecaster:
             Example: {"rsi": 0.25, "macd": 0.18, "volume_ratio": 0.15, ...}
         """
         # WHAT: Check if SHAP explainer available
-        # WHY: Fall back to placeholder if explainer not initialized
+        # WHY: Fall back to gradient-based importance if explainer not initialized
         if self.shap_explainer is None:
-            logger.debug("SHAP explainer not available, using placeholder")
-            return {"lstm_prediction": 1.0}
+            logger.debug("SHAP explainer not available, using gradient-based importance")
+            return self._calculate_gradient_importance(sequence)
 
         try:
             # WHAT: Calculate SHAP values for input
             # WHY: Get feature attributions for this specific prediction
             # HOW: Pass sequence through SHAP explainer
             # DATA: Input sequence -> SHAP values (1, seq_len, n_features)
+            logger.debug("Computing SHAP values...")
             shap_values = self.shap_explainer.shap_values(sequence)
 
             # WHAT: Aggregate SHAP values across time steps
@@ -1127,12 +1138,82 @@ class ProbabilisticForecaster:
                 sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:10]
             )
 
+            logger.info(f"SHAP feature importance calculated successfully")
             return sorted_importance
 
         except Exception as e:
             logger.warning(f"SHAP calculation failed: {e}")
-            logger.debug("Using placeholder feature importance")
-            return {"lstm_prediction": 1.0}
+            logger.info("Falling back to gradient-based importance")
+            return self._calculate_gradient_importance(sequence)
+
+    def _calculate_gradient_importance(self, sequence: np.ndarray) -> Dict[str, float]:
+        """Calculate feature importance using gradient-based method (SHAP fallback).
+
+        WHAT: Computes feature importance using input gradients
+        WHY: Provides fallback when SHAP fails, still gives meaningful importance
+        HOW: Calculate gradient of prediction with respect to input features
+        DATA: Input sequence -> gradients -> importance dict
+
+        Args:
+            sequence: Normalized input sequence (1, seq_len, n_features)
+
+        Returns:
+            Dictionary mapping feature names to importance scores
+        """
+        try:
+            # WHAT: Convert sequence to TensorFlow tensor
+            # WHY: Need TensorFlow operations for gradient computation
+            # HOW: Create tensor with gradient tracking enabled
+            sequence_tensor = tf.convert_to_tensor(sequence, dtype=tf.float32)
+
+            # WHAT: Calculate gradients using GradientTape
+            # WHY: Gradients show how much each input affects output
+            # HOW: Compute gradient of output with respect to input
+            with tf.GradientTape() as tape:
+                tape.watch(sequence_tensor)
+                predictions = self.lstm_model(sequence_tensor, training=False)
+                # Get score for predicted class
+                predicted_class = tf.argmax(predictions[0])
+                predicted_score = predictions[0][predicted_class]
+
+            # WHAT: Compute gradients
+            # DATA: (output_score) -> gradient w.r.t. input (1, seq_len, n_features)
+            gradients = tape.gradient(predicted_score, sequence_tensor)
+
+            if gradients is None:
+                logger.warning("Gradient computation returned None")
+                return {"lstm_features": 1.0}
+
+            # WHAT: Convert to numpy and aggregate across time dimension
+            # HOW: Take mean absolute gradient for each feature
+            # DATA: (1, seq_len, n_features) -> (n_features,)
+            gradients_np = gradients.numpy()
+            feature_importance_array = np.mean(np.abs(gradients_np[0]), axis=0)
+
+            # WHAT: Normalize to sum to 1
+            total_importance = np.sum(feature_importance_array)
+            if total_importance > 0:
+                feature_importance_array = feature_importance_array / total_importance
+
+            # WHAT: Create dictionary mapping feature names to scores
+            feature_importance = {}
+            for idx, feature_name in enumerate(self.lstm_feature_columns):
+                feature_importance[feature_name] = float(feature_importance_array[idx])
+
+            # WHAT: Sort and keep top 10
+            sorted_importance = dict(
+                sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:10]
+            )
+
+            logger.info("Gradient-based feature importance calculated successfully")
+            return sorted_importance
+
+        except Exception as e:
+            logger.warning(f"Gradient-based importance calculation failed: {e}")
+            logger.debug("Returning default importance")
+            # WHAT: Ultimate fallback - return equal importance for all features
+            # WHY: Better to show something than crash
+            return {"lstm_features": 1.0}
 
     def _calculate_rsi_series(self, prices: pd.Series, window: int = 14) -> pd.Series:
         """Calculate RSI for pandas Series.
