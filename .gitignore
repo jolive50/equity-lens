@@ -237,17 +237,30 @@ data/smart_money/cache/
 *.csv
 !data/training/prepared/.gitkeep
 
+# ChromaDB Vector Storage
+# What: ChromaDB persistent storage for vector embeddings
+# Why: Binary data files, can be rebuilt from source data
+# How: VectorStore will recreate collections on first use
+data/chroma/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+
 # Trained Models
 # What: Serialized ML models and artifacts
 # Why: Large binary files, can be retrained using scripts
 # How: Use scripts/train_forecaster.py to rebuild models
 model/artifacts/
 model/finbert/models--*
+model/finbert/tf_model.h5
+model/finbert/pytorch_model.bin
 *.joblib
 *.pth
 *.pt
 *.ckpt
 *.safetensors
+*.bin
+*.h5
 
 # Model Caches
 # What: Hugging Face and other ML framework caches
