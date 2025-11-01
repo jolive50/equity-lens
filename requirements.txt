@@ -4,60 +4,6 @@
 # HOW: Install with `pip install -r requirements.txt`
 # DATA: Organized by functional category for maintainability
 
-# Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.7.4
-
-# LangGraph workflow dependencies
-langchain==0.1.0
-langchain-core==0.1.8
-langgraph==0.0.20
-langchain-openai==0.0.2
-
-# Data Processing
-pandas==2.1.4
-numpy==1.26.4
-requests==2.31.0
-
-# Real financial data sources
-yfinance>=0.2.28
-alpha-vantage>=2.3.1
-
-# Machine Learning and NLP
-transformers==4.36.2
-torch==2.5.1
-scikit-learn==1.3.2
-tensorflow==2.18.0
-keras==3.7.0
-shap==0.44.1
-
-# Database
-sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
-alembic==1.13.1
-
-# Data Storage
-pyarrow==14.0.1
-parquet==1.3.1
-
-# Utilities
-python-dotenv==1.0.0
-python-multipart==0.0.6
-httpx==0.25.2
-
-# Development and Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-black==23.11.0
-flake8==6.1.0
-mypy==1.7.1
-
-# Monitoring and Logging
-structlog==23.2.0
-prometheus-client==0.19.0
 # ===== CORE WEB FRAMEWORK =====
 # WHAT: FastAPI async web framework and ASGI server
 # WHY: High-performance API endpoints for real-time stock analysis
@@ -87,8 +33,8 @@ requests==2.31.0          # HTTP client for API calls
 # WHAT: Real market data APIs for stocks, fundamentals, and historical prices
 # WHY: StockSense requires actual market data, never synthetic/mock data
 # HOW: yfinance for Yahoo Finance, alpha-vantage for fundamentals
-yfinance>=0.2.28          # Yahoo Finance data downloader
-alpha-vantage>=2.3.1      # Alpha Vantage API client for fundamentals
+yfinance>=0.2.28          # Yahoo Finance data downloader, MIT license, ~2MB
+alpha-vantage>=2.3.1      # Alpha Vantage API client for fundamentals, MIT license, <1MB
 
 # ===== MACHINE LEARNING & DEEP LEARNING =====
 # WHAT: TensorFlow for neural networks, transformers for FinBERT, scikit-learn for traditional ML
@@ -98,59 +44,68 @@ alpha-vantage>=2.3.1      # Alpha Vantage API client for fundamentals
 #       - FinBERT sentiment analysis (TensorFlow + transformers)
 #       - Probabilistic stock direction forecasting (scikit-learn)
 #       - Technical indicator feature engineering (NumPy + Pandas)
-transformers>=4.36.2      # HuggingFace transformers library for FinBERT
-tensorflow>=2.20.0        # TensorFlow deep learning framework (version 2.20+ with Keras 3 support)
-tf-keras>=2.20.0          # Backward-compatible Keras package for transformers library compatibility
-scikit-learn==1.3.2       # Traditional ML (gradient boosting, random forest, preprocessing)
+#       - Model explainability (SHAP for feature importance)
+transformers>=4.36.2      # HuggingFace transformers library for FinBERT, Apache 2.0, ~500MB with models
+tensorflow>=2.20.0        # TensorFlow deep learning framework (version 2.20+ with Keras 3 support), Apache 2.0, ~500MB
+tf-keras>=2.20.0          # Backward-compatible Keras package for transformers library compatibility, Apache 2.0
+torch>=2.5.1              # PyTorch for alternative model implementations, BSD license, ~800MB
+scikit-learn==1.3.2       # Traditional ML (gradient boosting, random forest, preprocessing), BSD license, ~10MB
+shap==0.44.1              # SHAP values for model explainability and feature importance, MIT license, ~5MB
+
+# ===== VECTOR DATABASE =====
+# WHAT: ChromaDB for semantic search and vector embeddings
+# WHY: Enable semantic news search, find similar historical patterns
+# HOW: Store news embeddings, query for relevant articles by similarity
+chromadb>=0.4.18          # Vector database for semantic search, Apache 2.0, ~50MB
 
 # ===== DATABASE & PERSISTENCE =====
 # WHAT: PostgreSQL database adapter and ORM
 # WHY: Store user data, watchlists, historical predictions, alerts
 # HOW: SQLAlchemy ORM with Alembic migrations
-sqlalchemy==2.0.23        # SQL toolkit and ORM
-psycopg2-binary==2.9.9    # PostgreSQL database adapter
-alembic==1.13.1           # Database migration tool
+sqlalchemy==2.0.23        # SQL toolkit and ORM, MIT license, ~3MB
+psycopg2-binary==2.9.9    # PostgreSQL database adapter, LGPL license, ~5MB
+alembic==1.13.1           # Database migration tool, MIT license, ~1MB
 
 # ===== DATA STORAGE =====
 # WHAT: Apache Parquet columnar storage format
 # WHY: Efficient storage for large historical datasets (S&P 500 fundamentals)
 # HOW: PyArrow provides fast read/write for Parquet files
-pyarrow==14.0.1           # Apache Arrow Python bindings
-parquet==1.3.1            # Parquet file format support
+pyarrow==14.0.1           # Apache Arrow Python bindings, Apache 2.0, ~30MB
+parquet==1.3.1            # Parquet file format support, Apache 2.0, ~1MB
 
 # ===== UTILITIES =====
 # WHAT: Environment configuration and HTTP client
 # WHY: Manage API keys securely, handle async HTTP requests
 # HOW: python-dotenv loads .env files, httpx for async HTTP
-python-dotenv==1.0.0      # Load environment variables from .env files
-python-multipart==0.0.6   # Multipart form data parser (for file uploads)
-httpx==0.25.2             # Async HTTP client for API integrations
+python-dotenv==1.0.0      # Load environment variables from .env files, BSD license, <1MB
+python-multipart==0.0.6   # Multipart form data parser (for file uploads), Apache 2.0, <1MB
+httpx==0.25.2             # Async HTTP client for API integrations, BSD license, ~2MB
 
 # ===== DEVELOPMENT & TESTING =====
 # WHAT: Testing framework, code quality tools, type checking
 # WHY: Maintain >80% test coverage, enforce code standards, catch type errors
-# HOW: pytest for testing, black for formatting, flake8 for linting, mypy for types
-pytest==7.4.3             # Testing framework with fixtures and parametrization
-pytest-asyncio==0.21.1    # Async test support for FastAPI endpoints
-pytest-cov==4.1.0         # Coverage reporting plugin
-pytest-mock==3.12.0       # Mocking and patching utilities
-black==23.11.0            # Opinionated code formatter
-flake8==6.1.0             # Linting tool for code quality
-mypy==1.7.1               # Static type checker
+# HOW: pytest for testing, black for formatting, ruff for linting, mypy for types
+pytest==7.4.3             # Testing framework with fixtures and parametrization, MIT license, ~2MB
+pytest-asyncio==0.21.1    # Async test support for FastAPI endpoints, Apache 2.0, <1MB
+pytest-cov==4.1.0         # Coverage reporting plugin, MIT license, <1MB
+pytest-mock==3.12.0       # Mocking and patching utilities, MIT license, <1MB
+black==23.11.0            # Opinionated code formatter, MIT license, ~1MB
+ruff==0.1.6               # Fast Python linter (replaces flake8), MIT license, ~10MB
+mypy==1.7.1               # Static type checker, MIT license, ~5MB
 
 # ===== MONITORING & LOGGING =====
 # WHAT: Structured logging and Prometheus metrics
 # WHY: Production observability for debugging and performance monitoring
 # HOW: structlog for structured logs, prometheus-client for metrics export
-structlog==23.2.0         # Structured logging library
-prometheus-client==0.19.0 # Prometheus metrics instrumentation
+structlog==23.2.0         # Structured logging library, MIT license, <1MB
+prometheus-client==0.19.0 # Prometheus metrics instrumentation, Apache 2.0, <1MB
 
 # ===== VISUALIZATION (OPTIONAL) =====
 # WHAT: Data visualization for model evaluation and debugging
 # WHY: Visualize probability curves, feature importance, technical indicators
 # HOW: Matplotlib for plotting (used in model training scripts)
 # NOTE: Only needed for development/training, not production deployment
-# matplotlib>=3.8.0
+# matplotlib>=3.8.0       # Plotting library, PSF license, ~30MB (uncomment if needed for model training)
 
 # ===== INSTALLATION NOTES =====
 # 1. Create virtual environment: python -m venv venv
@@ -162,8 +117,15 @@ prometheus-client==0.19.0 # Prometheus metrics instrumentation
 # 7. Start API server: uvicorn pipelines.realtime.api:app --reload
 
 # ===== GPU SUPPORT =====
-# TensorFlow 2.18.0 includes GPU support by default
+# TensorFlow 2.20.0+ and PyTorch 2.5.1+ include GPU support by default
 # For NVIDIA GPUs, ensure CUDA toolkit is installed:
-# - CUDA 12.x (compatible with TensorFlow 2.18)
-# - cuDNN 8.9+ (included with tensorflow package)
-# Verify GPU: python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+# - CUDA 12.x (compatible with TensorFlow 2.20+ and PyTorch 2.5+)
+# - cuDNN 8.9+ (included with tensorflow and torch packages)
+# Verify GPU availability:
+#   TensorFlow: python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+#   PyTorch: python -c "import torch; print(torch.cuda.is_available())"
+
+# ===== TOTAL DISK SPACE ESTIMATE =====
+# Base packages: ~2GB
+# With ML models (FinBERT, etc.): ~3-4GB
+# Ensure sufficient disk space before installation
