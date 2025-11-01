@@ -48,6 +48,20 @@
       "direction": "neutral",
       "confidence": 0.38477110862731934,
       "score": 0.9082425832748413
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T19:14:09.536133Z",
+      "direction": "neutral",
+      "confidence": 0.3891028165817261,
+      "score": 0.9082425236701965
+    },
+    {
+      "ticker": "AAPL",
+      "as_of": "2025-10-29T19:37:06.259947Z",
+      "direction": "neutral",
+      "confidence": 0.3858194649219513,
+      "score": 0.9082425236701965
     }
   ]
 }
