@@ -119,20 +119,77 @@ The simplified workflow follows a linear pipeline:
 
 **Interface:** `BasePredictionModel` with `predict(data, fundamentals) -> PredictionResult`
 
+**Adapter Layer:** `models/prediction/forecaster.py`
+
+#### How the Forecaster Adapter Works
+
+Pam's minimal implementation provides:
+- `LSTMModel`, `GRUModel`, `GradientBoostModel` classes
+- `PredictionResult` dataclass
+- Direct model instantiation
+
+Josh's PredictionAgent expects:
+- `create_forecaster()` factory function
+- `ForecastResult` dataclass (includes daily_probs, horizon_95)
+- Momentum-based fallback when model unavailable
+
+**The adapter bridges these:** `forecaster.py` (186 lines)
+1. Wraps Pam's models in a `ProbabilisticForecaster` class
+2. Provides `create_forecaster("lstm")` factory function
+3. Converts Pam's `PredictionResult` to Josh's `ForecastResult`
+4. Adds daily probability curve generation (legacy pattern reused)
+5. Calculates 95% confidence horizon (legacy pattern reused)
+6. Provides momentum-based fallback (legacy pattern reused)
+
 **Usage:**
 ```python
 from models.prediction.forecaster import create_forecaster
 
-forecaster = create_forecaster("lstm")
+forecaster = create_forecaster("lstm")  # or "gru", "gradient_boosting"
 result = forecaster.predict(market_data, fundamentals)
 ```
 
-**What PredictionAgent expects:**
+**What PredictionAgent receives:**
 - `result.direction` - "up", "down", or "neutral"
 - `result.confidence` - float between 0.0 and 1.0
-- `result.feature_importance` - Optional SHAP scores
-- `result.daily_probs` - Optional probability curve
-- `result.horizon_95` - Optional 95% confidence horizon
+- `result.daily_probs` - List of 30 daily probability dicts
+- `result.horizon_95` - Dict with 95% confidence horizon metadata
+- `result.feature_importance` - Dict of feature importance scores
+- `result.model_metadata` - Dict with model type and probabilities
+
+**Code snippet from forecaster.py:**
+```python
+# Adapter converts DataFrame format for Pam's model
+df = pd.DataFrame(market_data)
+df = df.rename(columns={'close': 'Close', 'open': 'Open', ...})
+
+# Call Pam's model
+pam_result = self.model.predict(df)
+
+# Generate additional fields Josh needs
+daily_probs = self._generate_daily_probabilities(
+    pam_result.probabilities['up'],
+    pam_result.probabilities['down'],
+    pam_result.probabilities['neutral']
+)
+
+# Return ForecastResult with all fields
+return ForecastResult(
+    direction=pam_result.direction,
+    confidence=pam_result.confidence,
+    daily_probs=daily_probs,
+    horizon_95=self._calculate_95_horizon(daily_probs),
+    feature_importance=pam_result.metadata.get('feature_importance', {}),
+    model_metadata={"model_type": self.model_type, ...}
+)
+```
+
+**Key functions reused from legacy (lines cited):**
+- `_generate_daily_probabilities()` - Legacy forecaster.py:1375-1416
+- `_calculate_95_horizon()` - Legacy forecaster.py:1418-1466
+- `_trend_based_prediction()` - Legacy forecaster.py:1321-1364
+
+This adapter is minimal (186 lines) vs. legacy forecaster (1,553 lines), keeping only what's needed for Josh-Pam integration.
 
 ### Josh → Tae (Sentiment Models)
 
