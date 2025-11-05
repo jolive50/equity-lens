@@ -1,0 +1,30 @@
+# FreshStart Workflow Configuration Example
+# Copy this file to config.yaml and customize as needed
+
+# Prediction models to use (PAM's models)
+# Options: LSTM, GRU, GradientBoost
+prediction_models:
+  - LSTM
+  # - GRU
+  # - GradientBoost
+
+# Whether to use ensemble (requires 2+ models)
+use_ensemble: false
+
+# Ensemble strategy: weighted_average, simple_average, voting
+ensemble_strategy: weighted_average
+
+# Model weights for weighted_average strategy
+model_weights:
+  LSTM: 0.5
+  GRU: 0.3
+  GradientBoost: 0.2
+
+# Enable reflection agent for quality validation
+reflection_enabled: true
+
+# Confidence threshold for recommendations (0.0 - 1.0)
+confidence_threshold: 0.95
+
+# Sentiment models (TAE's responsibility - to be implemented)
+sentiment_models: []
