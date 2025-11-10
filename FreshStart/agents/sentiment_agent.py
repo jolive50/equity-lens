@@ -20,7 +20,7 @@ class SentimentAgentResult:
 
 
 class SentimentAgent:
-    """Agent that analyzes news sentiment."""
+    """Agent that analyzes news sentiment using Tae's real ML models."""
 
     def __init__(self, sentiment_model=None):
         """Initialize SentimentAgent.
@@ -28,15 +28,31 @@ class SentimentAgent:
         Args:
             sentiment_model: Optional BaseSentimentModel instance
         """
-        self.sentiment_model = sentiment_model
-        logger.info("SentimentAgent initialized")
+        if sentiment_model is None:
+            # Use Tae's FinBERT model as default (best for financial sentiment)
+            try:
+                from models.sentiment.finbert_model import FinBERTModel
+                self.sentiment_model = FinBERTModel()
+                logger.info("SentimentAgent initialized with FinBERT model")
+            except Exception as e:
+                logger.warning(f"Failed to load FinBERT, trying VADER fallback: {e}")
+                try:
+                    from models.sentiment.vader_model import VADERModel
+                    self.sentiment_model = VADERModel()
+                    logger.info("SentimentAgent initialized with VADER model")
+                except Exception as e2:
+                    logger.error(f"Failed to load any sentiment model: {e2}")
+                    self.sentiment_model = None
+        else:
+            self.sentiment_model = sentiment_model
+            logger.info(f"SentimentAgent initialized with {sentiment_model.get_model_info()['name']}")
 
     def run(
         self,
         ticker: str,
         news_data: List[Dict[str, Any]]
     ) -> SentimentAgentResult:
-        """Analyze sentiment for stock news.
+        """Analyze sentiment for stock news using real ML models.
 
         Args:
             ticker: Stock symbol
@@ -54,25 +70,67 @@ class SentimentAgent:
                 headlines=[]
             )
 
-        # Simple sentiment analysis (placeholder for TAE's models)
-        sentiment_scores = []
+        if self.sentiment_model is None:
+            logger.error("No sentiment model available, returning neutral")
+            return SentimentAgentResult(
+                current="neutral",
+                score=0.5,
+                trend="stable",
+                headlines=[article.get("title", "") for article in news_data[:3]]
+            )
+
+        # Use REAL sentiment analysis with Tae's models
+        sentiment_results = []
         headlines = []
 
         for article in news_data[:10]:  # Analyze top 10 articles
             title = article.get("title", "")
+            content = article.get("content", "") or article.get("summary", "")
+
+            if not title and not content:
+                continue
+
             headlines.append(title)
 
-            # Simple keyword-based sentiment (will be replaced by TAE's FinBERT)
-            title_lower = title.lower()
-            if any(word in title_lower for word in ["beat", "surge", "growth", "profit"]):
-                sentiment_scores.append(0.7)
-            elif any(word in title_lower for word in ["miss", "decline", "loss", "weak"]):
-                sentiment_scores.append(0.3)
-            else:
-                sentiment_scores.append(0.5)
+            # Analyze using REAL ML model (FinBERT or VADER)
+            try:
+                # Combine title and content for better analysis
+                text_to_analyze = f"{title}. {content[:200]}" if content else title
 
-        # Calculate average sentiment
-        avg_score = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0.5
+                result = self.sentiment_model.analyze(text_to_analyze)
+
+                # Convert sentiment label to score
+                if result.label == "positive":
+                    score = 0.5 + (result.confidence * 0.5)  # 0.5-1.0
+                elif result.label == "negative":
+                    score = 0.5 - (result.confidence * 0.5)  # 0.0-0.5
+                else:  # neutral
+                    score = 0.5
+
+                sentiment_results.append({
+                    "score": score,
+                    "label": result.label,
+                    "confidence": result.confidence,
+                    "probabilities": result.probabilities
+                })
+
+                logger.debug(f"Article sentiment: {result.label} ({result.confidence:.2f}) - {title[:50]}")
+
+            except Exception as e:
+                logger.warning(f"Failed to analyze article '{title[:50]}': {e}")
+                continue
+
+        if not sentiment_results:
+            logger.warning(f"No articles successfully analyzed for {ticker}")
+            return SentimentAgentResult(
+                current="neutral",
+                score=0.5,
+                trend="stable",
+                headlines=headlines[:3]
+            )
+
+        # Calculate average sentiment score
+        avg_score = sum(r["score"] for r in sentiment_results) / len(sentiment_results)
 
         # Determine sentiment category
         if avg_score > 0.6:
@@ -82,8 +140,22 @@ class SentimentAgent:
         else:
             current = "neutral"
 
-        # Determine trend (placeholder logic)
-        trend = "stable"
+        # Calculate trend (compare first half vs second half)
+        if len(sentiment_results) >= 4:
+            mid = len(sentiment_results) // 2
+            first_half_avg = sum(r["score"] for r in sentiment_results[:mid]) / mid
+            second_half_avg = sum(r["score"] for r in sentiment_results[mid:]) / (len(sentiment_results) - mid)
+
+            if second_half_avg - first_half_avg > 0.1:
+                trend = "improving"
+            elif first_half_avg - second_half_avg > 0.1:
+                trend = "declining"
+            else:
+                trend = "stable"
+        else:
+            trend = "stable"
+
+        logger.info(f"Sentiment analysis complete: {current} (score={avg_score:.2f}, trend={trend})")
 
         return SentimentAgentResult(
             current=current,
