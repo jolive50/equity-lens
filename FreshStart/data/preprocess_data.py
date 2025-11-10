@@ -9,7 +9,7 @@ Usage:
 import logging
 import sys
 from pathlib import Path
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
 
@@ -30,6 +30,8 @@ class DataPreprocessor:
         self.raw_data_dir = Path(raw_data_dir)
         self.processed_data_dir = Path(processed_data_dir)
         self.processed_data_dir.mkdir(parents=True, exist_ok=True)
+        self.aggregate_file = self.raw_data_dir / "sp500_stocks.csv"
+        self._aggregate_df: Optional[pd.DataFrame] = None
 
     def load_stock_data(self, ticker: str) -> pd.DataFrame:
         """Load individual stock CSV file.
@@ -42,10 +44,12 @@ class DataPreprocessor:
         """
         csv_file = self.raw_data_dir / f"{ticker}.csv"
 
-        if not csv_file.exists():
+        if csv_file.exists():
+            df = pd.read_csv(csv_file)
+        elif self.aggregate_file.exists():
+            df = self._load_from_aggregate(ticker)
+        else:
             raise FileNotFoundError(f"Stock file not found: {csv_file}")
-
-        df = pd.read_csv(csv_file)
 
         # Standardize column names
         df.columns = df.columns.str.lower().str.strip()
@@ -56,6 +60,67 @@ class DataPreprocessor:
             df = df.sort_values('date').reset_index(drop=True)
 
         return df
+
+    def _load_from_aggregate(self, ticker: str) -> pd.DataFrame:
+        """Load stock rows from aggregated Kaggle CSV."""
+        aggregate_df = self._load_aggregate_dataset()
+        ticker_upper = ticker.upper()
+        df = aggregate_df[aggregate_df['symbol'] == ticker_upper].copy()
+
+        if df.empty:
+            raise FileNotFoundError(
+                f"{ticker_upper} not found in {self.aggregate_file}"
+            )
+
+        return df
+
+    def _load_aggregate_dataset(self) -> pd.DataFrame:
+        """Load and cache the aggregated Kaggle dataset."""
+        if self._aggregate_df is None:
+            if not self.aggregate_file.exists():
+                raise FileNotFoundError(
+                    f"Aggregate dataset missing: {self.aggregate_file}"
+                )
+
+            df = pd.read_csv(self.aggregate_file)
+            df.columns = (
+                df.columns
+                .str.strip()
+                .str.lower()
+                .str.replace(" ", "_")
+            )
+
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'], errors='coerce')
+
+            for col in ['adj_close', 'close', 'high', 'low', 'open', 'volume']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+            if 'symbol' in df.columns:
+                df['symbol'] = df['symbol'].str.upper()
+
+            df = df.dropna(subset=['symbol', 'date'])
+            self._aggregate_df = df.sort_values(['symbol', 'date']).reset_index(drop=True)
+
+        return self._aggregate_df
+
+    def _get_available_tickers(self) -> List[str]:
+        """Return a list of tickers based on available files or aggregate CSV."""
+        csv_files = list(self.raw_data_dir.glob("*.csv"))
+        tickers = [
+            f.stem for f in csv_files
+            if f.name not in ['sp500_companies.csv', 'sp500_index.csv', 'sp500_stocks.csv']
+        ]
+
+        if tickers:
+            return sorted(set(tickers))
+
+        if self.aggregate_file.exists():
+            aggregate_df = self._load_aggregate_dataset()
+            return sorted(aggregate_df['symbol'].unique().tolist())
+
+        return []
 
     def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Engineer features for ML models.
@@ -191,19 +256,14 @@ class DataPreprocessor:
         """
         logger.info(f"Processing up to {max_stocks} stocks...")
 
-        # Get list of stock CSV files
-        csv_files = list(self.raw_data_dir.glob("*.csv"))
-        stock_files = [
-            f for f in csv_files
-            if f.name not in ['sp500_companies.csv', 'sp500_index.csv', 'sp500_stocks.csv']
-        ]
+        tickers = self._get_available_tickers()
 
-        if not stock_files:
+        if not tickers:
             raise FileNotFoundError("No stock CSV files found")
 
         # Limit number of stocks
-        stock_files = stock_files[:max_stocks]
-        logger.info(f"Processing {len(stock_files)} stocks")
+        tickers = tickers[:max_stocks]
+        logger.info(f"Processing {len(tickers)} stocks")
 
         X_lstm_all = []
         y_lstm_all = []
@@ -212,8 +272,7 @@ class DataPreprocessor:
 
         successful_stocks = []
 
-        for csv_file in stock_files:
-            ticker = csv_file.stem
+        for ticker in tickers:
             try:
                 # Load and preprocess
                 df = self.load_stock_data(ticker)
