@@ -6,7 +6,10 @@ Integrates with LangGraph workflow to provide stock analysis endpoint.
 import logging
 import os
 import warnings
+from pathlib import Path
 from typing import Dict, Any
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -25,6 +28,9 @@ warnings.filterwarnings(
     message=r"`resume_download` is deprecated",
     category=FutureWarning,
 )
+
+ENV_PATH = Path(__file__).resolve().parent.parent / "secrets.env"
+load_dotenv(ENV_PATH)
 
 from api.models import (
     AnalysisRequest,
