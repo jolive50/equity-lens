@@ -5,16 +5,21 @@ FreshStart - Model Training Report
 
 LSTM Model:
 ----------------------------------------
-  train_accuracy: 0.5592
-  val_accuracy: 0.5664
-  train_loss: 0.9725
-  val_loss: 0.9729
+  train_accuracy: 0.5585
+  val_accuracy: 0.5668
+  train_loss: 0.9742
+  val_loss: 0.9709
 
 GRU Model:
 ----------------------------------------
-  train_accuracy: 0.5567
-  val_accuracy: 0.5665
-  train_loss: 0.9764
-  val_loss: 0.9747
+  train_accuracy: 0.5589
+  val_accuracy: 0.5642
+  train_loss: 0.9719
+  val_loss: 0.9770
+
+GradientBoost Model:
+----------------------------------------
+  train_accuracy: 0.5952
+  val_accuracy: 0.5713
 
 ============================================================
