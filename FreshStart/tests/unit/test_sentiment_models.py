@@ -5,6 +5,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from models.sentiment.base_sentiment import BaseSentimentModel, SentimentResult
+from models.sentiment.vader_model import VADERModel
+from models.sentiment.textblob_model import TextBlobModel
+
 
 @pytest.fixture
 def positive_text_samples():
@@ -39,161 +43,212 @@ def neutral_text_samples():
     ]
 
 
-class TestBaseSentimentModel:
-    """Test base sentiment model interface (Tae's component)."""
+class TestSentimentResult:
+    """Test SentimentResult dataclass."""
 
-    def test_sentiment_model_placeholder(self):
-        """Placeholder - will test when Tae implements base_sentiment.py."""
-        pytest.skip("Base sentiment model not yet implemented by Tae")
-
-
-class TestFinBERTModel:
-    """Test FinBERT sentiment model (Tae's component)."""
-
-    def test_finbert_positive_sentiment(self, positive_text_samples):
-        """Test FinBERT on positive financial texts."""
-        pytest.skip("FinBERT model not yet implemented by Tae")
-
-    def test_finbert_negative_sentiment(self, negative_text_samples):
-        """Test FinBERT on negative financial texts."""
-        pytest.skip("FinBERT model not yet implemented by Tae")
-
-    def test_finbert_neutral_sentiment(self, neutral_text_samples):
-        """Test FinBERT on neutral financial texts."""
-        pytest.skip("FinBERT model not yet implemented by Tae")
-
-    def test_finbert_returns_standardized_format(self):
-        """Test that FinBERT returns SentimentResult format."""
-        pytest.skip("FinBERT model not yet implemented by Tae")
-
-    def test_finbert_confidence_scores(self):
-        """Test that FinBERT returns confidence scores between -1 and 1."""
-        pytest.skip("FinBERT model not yet implemented by Tae")
-
-
-class TestRoBERTaModel:
-    """Test RoBERTa sentiment model (Tae's component)."""
-
-    def test_roberta_positive_sentiment(self, positive_text_samples):
-        """Test RoBERTa on positive texts."""
-        pytest.skip("RoBERTa model not yet implemented by Tae")
-
-    def test_roberta_negative_sentiment(self, negative_text_samples):
-        """Test RoBERTa on negative texts."""
-        pytest.skip("RoBERTa model not yet implemented by Tae")
-
-    def test_roberta_model_info(self):
-        """Test RoBERTa get_model_info method."""
-        pytest.skip("RoBERTa model not yet implemented by Tae")
+    def test_sentiment_result_creation(self):
+        """Test creating a SentimentResult."""
+        result = SentimentResult(
+            label="positive",
+            confidence=0.85,
+            probabilities={"positive": 0.85, "negative": 0.05, "neutral": 0.10},
+            metadata={"model": "TestModel"}
+        )
+        assert result.label == "positive"
+        assert result.confidence == 0.85
+        assert result.probabilities["positive"] == 0.85
+        assert result.metadata["model"] == "TestModel"
 
 
 class TestVADERModel:
     """Test VADER sentiment model (Tae's component)."""
 
+    def test_vader_initialization(self):
+        """Test VADER model initialization."""
+        model = VADERModel()
+        assert model.analyzer is not None
+
     def test_vader_positive_sentiment(self, positive_text_samples):
         """Test VADER on positive texts."""
-        pytest.skip("VADER model not yet implemented by Tae")
+        model = VADERModel()
+        for text in positive_text_samples:
+            result = model.analyze(text)
+            assert isinstance(result, SentimentResult)
+            assert result.label in ["positive", "negative", "neutral"]
+            assert 0 <= result.confidence <= 1
 
     def test_vader_negative_sentiment(self, negative_text_samples):
         """Test VADER on negative texts."""
-        pytest.skip("VADER model not yet implemented by Tae")
+        model = VADERModel()
+        for text in negative_text_samples:
+            result = model.analyze(text)
+            assert isinstance(result, SentimentResult)
+            assert result.label in ["positive", "negative", "neutral"]
+            assert 0 <= result.confidence <= 1
+
+    def test_vader_neutral_sentiment(self, neutral_text_samples):
+        """Test VADER on neutral texts."""
+        model = VADERModel()
+        for text in neutral_text_samples:
+            result = model.analyze(text)
+            assert isinstance(result, SentimentResult)
+            assert result.label in ["positive", "negative", "neutral"]
+            assert 0 <= result.confidence <= 1
 
     def test_vader_compound_score(self):
         """Test that VADER returns compound sentiment score."""
-        pytest.skip("VADER model not yet implemented by Tae")
+        model = VADERModel()
+        result = model.analyze("This stock is great!")
+        assert "compound_score" in result.metadata
+        assert isinstance(result.metadata["compound_score"], float)
+
+    def test_vader_empty_text_raises_error(self):
+        """Test that VADER raises error on empty text."""
+        model = VADERModel()
+        with pytest.raises(ValueError, match="Text cannot be empty"):
+            model.analyze("")
+
+    def test_vader_batch_analysis(self, positive_text_samples):
+        """Test VADER batch analysis."""
+        model = VADERModel()
+        results = model.analyze_batch(positive_text_samples)
+        assert len(results) == len(positive_text_samples)
+        assert all(isinstance(r, SentimentResult) for r in results)
+
+    def test_vader_get_model_info(self):
+        """Test VADER get_model_info method."""
+        model = VADERModel()
+        info = model.get_model_info()
+        assert info["name"] == "VADER"
+        assert info["type"] == "rule-based"
+        assert "capabilities" in info
 
 
 class TestTextBlobModel:
     """Test TextBlob sentiment model (Tae's component)."""
 
+    def test_textblob_initialization(self):
+        """Test TextBlob model initialization."""
+        model = TextBlobModel()
+        assert model is not None
+
     def test_textblob_positive_sentiment(self, positive_text_samples):
         """Test TextBlob on positive texts."""
-        pytest.skip("TextBlob model not yet implemented by Tae")
+        model = TextBlobModel()
+        for text in positive_text_samples:
+            result = model.analyze(text)
+            assert isinstance(result, SentimentResult)
+            assert result.label in ["positive", "negative", "neutral"]
+            assert 0 <= result.confidence <= 1
 
     def test_textblob_negative_sentiment(self, negative_text_samples):
         """Test TextBlob on negative texts."""
-        pytest.skip("TextBlob model not yet implemented by Tae")
+        model = TextBlobModel()
+        for text in negative_text_samples:
+            result = model.analyze(text)
+            assert isinstance(result, SentimentResult)
+            assert result.label in ["positive", "negative", "neutral"]
+            assert 0 <= result.confidence <= 1
 
     def test_textblob_polarity_score(self):
         """Test that TextBlob returns polarity scores."""
-        pytest.skip("TextBlob model not yet implemented by Tae")
+        model = TextBlobModel()
+        result = model.analyze("This is amazing!")
+        assert "polarity" in result.metadata
+        assert "subjectivity" in result.metadata
+        assert isinstance(result.metadata["polarity"], float)
 
+    def test_textblob_empty_text_raises_error(self):
+        """Test that TextBlob raises error on empty text."""
+        model = TextBlobModel()
+        with pytest.raises(ValueError, match="Text cannot be empty"):
+            model.analyze("")
 
-class TestAlphaVantageSentiment:
-    """Test Alpha Vantage sentiment API wrapper (Tae's component)."""
+    def test_textblob_batch_analysis(self, positive_text_samples):
+        """Test TextBlob batch analysis."""
+        model = TextBlobModel()
+        results = model.analyze_batch(positive_text_samples)
+        assert len(results) == len(positive_text_samples)
+        assert all(isinstance(r, SentimentResult) for r in results)
 
-    def test_alpha_vantage_api_call(self):
-        """Test Alpha Vantage sentiment API integration."""
-        pytest.skip("Alpha Vantage sentiment not yet implemented by Tae")
-
-    def test_alpha_vantage_rate_limiting(self):
-        """Test handling of API rate limits."""
-        pytest.skip("Alpha Vantage sentiment not yet implemented by Tae")
-
-    def test_alpha_vantage_error_handling(self):
-        """Test error handling for API failures."""
-        pytest.skip("Alpha Vantage sentiment not yet implemented by Tae")
-
-
-class TestSentimentEnsemble:
-    """Test sentiment ensemble (Tae's component)."""
-
-    def test_ensemble_with_two_models(self):
-        """Test ensemble with minimum 2 models."""
-        pytest.skip("Sentiment ensemble not yet implemented by Tae")
-
-    def test_ensemble_with_all_models(self):
-        """Test ensemble with all 5 sentiment models."""
-        pytest.skip("Sentiment ensemble not yet implemented by Tae")
-
-    def test_ensemble_weighted_averaging(self):
-        """Test weighted averaging strategy."""
-        pytest.skip("Sentiment ensemble not yet implemented by Tae")
-
-    def test_ensemble_simple_averaging(self):
-        """Test simple averaging strategy."""
-        pytest.skip("Sentiment ensemble not yet implemented by Tae")
-
-    def test_ensemble_per_model_breakdown(self):
-        """Test that ensemble returns individual model scores."""
-        pytest.skip("Sentiment ensemble not yet implemented by Tae")
-
-    def test_ensemble_handles_model_failure(self):
-        """Test ensemble continues when one model fails."""
-        pytest.skip("Sentiment ensemble not yet implemented by Tae")
+    def test_textblob_get_model_info(self):
+        """Test TextBlob get_model_info method."""
+        model = TextBlobModel()
+        info = model.get_model_info()
+        assert info["name"] == "TextBlob"
+        assert info["type"] == "pattern-based"
+        assert "capabilities" in info
 
 
 class TestSentimentModelInterface:
     """Test that all sentiment models follow base interface."""
 
-    def test_all_models_implement_analyze_method(self):
-        """Test that all sentiment models have analyze() method."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+    def test_vader_implements_base_interface(self):
+        """Test that VADER implements BaseSentimentModel."""
+        model = VADERModel()
+        assert isinstance(model, BaseSentimentModel)
+        assert hasattr(model, "analyze")
+        assert hasattr(model, "analyze_batch")
+        assert hasattr(model, "get_model_info")
 
-    def test_all_models_implement_get_model_info(self):
-        """Test that all sentiment models have get_model_info() method."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+    def test_textblob_implements_base_interface(self):
+        """Test that TextBlob implements BaseSentimentModel."""
+        model = TextBlobModel()
+        assert isinstance(model, BaseSentimentModel)
+        assert hasattr(model, "analyze")
+        assert hasattr(model, "analyze_batch")
+        assert hasattr(model, "get_model_info")
 
     def test_all_models_return_sentiment_result(self):
         """Test that all models return SentimentResult dataclass."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+        text = "Test sentiment analysis"
+
+        vader = VADERModel()
+        vader_result = vader.analyze(text)
+        assert isinstance(vader_result, SentimentResult)
+
+        textblob = TextBlobModel()
+        textblob_result = textblob.analyze(text)
+        assert isinstance(textblob_result, SentimentResult)
 
     def test_sentiment_result_has_required_fields(self):
-        """Test SentimentResult has label, score, and metadata."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+        """Test SentimentResult has label, confidence, probabilities, and metadata."""
+        model = VADERModel()
+        result = model.analyze("Test text")
+        assert hasattr(result, "label")
+        assert hasattr(result, "confidence")
+        assert hasattr(result, "probabilities")
+        assert hasattr(result, "metadata")
+        assert result.label in ["positive", "negative", "neutral"]
+        assert 0 <= result.confidence <= 1
+        assert "positive" in result.probabilities
+        assert "negative" in result.probabilities
+        assert "neutral" in result.probabilities
 
 
 class TestSentimentScoreValidation:
     """Test sentiment score validation across all models."""
 
-    def test_scores_within_valid_range(self):
-        """Test that all sentiment scores are between -1 and 1."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+    def test_vader_scores_within_valid_range(self):
+        """Test that VADER sentiment scores are valid."""
+        model = VADERModel()
+        result = model.analyze("Great stock performance!")
+        assert 0 <= result.confidence <= 1
+        for prob in result.probabilities.values():
+            assert 0 <= prob <= 1
 
-    def test_positive_label_has_positive_score(self):
-        """Test that positive labels have positive scores."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+    def test_textblob_scores_within_valid_range(self):
+        """Test that TextBlob sentiment scores are valid."""
+        model = TextBlobModel()
+        result = model.analyze("Poor earnings report")
+        assert 0 <= result.confidence <= 1
+        for prob in result.probabilities.values():
+            assert 0 <= prob <= 1
 
-    def test_negative_label_has_negative_score(self):
-        """Test that negative labels have negative scores."""
-        pytest.skip("Sentiment models not yet implemented by Tae")
+    def test_probabilities_sum_to_one(self):
+        """Test that probability distributions sum to approximately 1.0."""
+        models = [VADERModel(), TextBlobModel()]
+        for model in models:
+            result = model.analyze("Test sentiment")
+            prob_sum = sum(result.probabilities.values())
+            assert 0.99 <= prob_sum <= 1.01
