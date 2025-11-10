@@ -84,3 +84,10 @@ Thumbs.db
 *.swp
 
 kaggle.json
+
+# Node / Next.js artifacts
+node_modules/
+**/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+frontend/package-lock.json

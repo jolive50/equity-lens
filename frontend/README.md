@@ -53,10 +53,14 @@ frontend/
 
 ## API Integration
 
-The frontend connects to the FastAPI backend via proxy:
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
-- Proxy: `/api/*` → `http://localhost:8000/*`
+API calls target the FastAPI backend directly using an environment variable:
+
+```bash
+# frontend/.env.local
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+If the variable is not set the app falls back to `http://localhost:8000`.
 
 ## Features
 

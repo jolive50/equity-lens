@@ -4,11 +4,27 @@ SUA's Component - Backend API
 Integrates with LangGraph workflow to provide stock analysis endpoint.
 """
 import logging
+import os
+import warnings
 from typing import Dict, Any
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+
+os.environ.setdefault("NUMEXPR_MAX_THREADS", "8")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"`torch\.utils\._pytree\._register_pytree_node` is deprecated",
+    category=FutureWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"`resume_download` is deprecated",
+    category=FutureWarning,
+)
 
 from api.models import (
     AnalysisRequest,

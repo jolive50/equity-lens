@@ -1,25 +1,38 @@
+import logging
 import os
-import requests
-from typing import Dict, List, Optional
-from datetime import datetime
 import time
+from datetime import datetime
+from typing import Dict, List, Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
 
 
 class NewsDataFetcher:
     """Fetch financial news from Alpha Vantage NEWS_SENTIMENT API."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, require_api_key: bool = False):
         """Initialize news fetcher with API key.
 
         Args:
             api_key: Alpha Vantage API key (defaults to ALPHA_VANTAGE_API_KEY env var)
+            require_api_key: If True, raise when API key is missing
 
         Raises:
             ValueError: If API key not provided
         """
         self.api_key = api_key or os.getenv("ALPHA_VANTAGE_API_KEY")
-        if not self.api_key:
+        self.require_api_key = require_api_key
+        self._api_available = bool(self.api_key)
+
+        if not self.api_key and require_api_key:
             raise ValueError("Alpha Vantage API key required")
+        if not self.api_key:
+            logger.warning(
+                "Alpha Vantage API key not configured; NewsDataFetcher will fall back "
+                "to offline sample articles."
+            )
 
         self.base_url = "https://www.alphavantage.co/query"
         self.rate_limit_delay = 12  # Alpha Vantage: 5 calls/min for free tier
@@ -45,6 +58,12 @@ class NewsDataFetcher:
         Raises:
             RuntimeError: If API call fails
         """
+        if not self.api_key:
+            logger.info(
+                "Returning offline news sample for %s (API key missing)", ticker
+            )
+            return self._offline_articles(ticker, limit)
+
         params = {
             "function": "NEWS_SENTIMENT",
             "tickers": ticker,
@@ -129,5 +148,66 @@ class NewsDataFetcher:
                 "ticker_sentiment": item.get("ticker_sentiment", [])
             }
             articles.append(article)
+
+        return articles
+
+    def _offline_articles(self, ticker: str, limit: int) -> List[Dict]:
+        """Return deterministic offline articles when API access is unavailable."""
+        templates = [
+            {
+                "title": "{ticker} extends rally as demand stays resilient",
+                "content": (
+                    "{ticker} shares advanced in extended trading after analysts pointed "
+                    "to resilient demand across core product lines."
+                ),
+                "source": "FreshStart Daily",
+                "sentiment": {"label": "Positive", "score": 0.32},
+            },
+            {
+                "title": "Regulators scrutinize {ticker} ahead of policy update",
+                "content": (
+                    "Regulators signaled fresh scrutiny for {ticker}, though management "
+                    "believes existing compliance investments limit downside risk."
+                ),
+                "source": "MarketWatch",
+                "sentiment": {"label": "Neutral", "score": 0.04},
+            },
+            {
+                "title": "{ticker} suppliers flag mixed signals heading into earnings",
+                "content": (
+                    "Key suppliers reported softer component orders tied to {ticker}, "
+                    "suggesting investors should brace for modest volatility."
+                ),
+                "source": "GlobalWire",
+                "sentiment": {"label": "Negative", "score": -0.21},
+            },
+        ]
+
+        if limit <= 0:
+            return []
+
+        articles: List[Dict] = []
+        now = datetime.utcnow()
+        max_items = min(limit, 50)
+        for idx in range(max_items):
+            template = templates[idx % len(templates)]
+            articles.append(
+                {
+                    "title": template["title"].format(ticker=ticker.upper()),
+                    "content": template["content"].format(ticker=ticker.upper()),
+                    "source": template["source"],
+                    "timestamp": (now.isoformat()),
+                    "url": "",
+                    "sentiment": template["sentiment"],
+                    "ticker_sentiment": [
+                        {
+                            "ticker": ticker.upper(),
+                            "relevance_score": "0.75",
+                            "ticker_sentiment_label": template["sentiment"]["label"],
+                            "ticker_sentiment_score": str(template["sentiment"]["score"]),
+                        }
+                    ],
+                }
+            )
 
         return articles
