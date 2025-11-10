@@ -1,5 +1,3 @@
-"""Storage module for database and vector store."""
+from .database import Database
 
-from .vector_store import NewsVectorStore
-
-__all__ = ["NewsVectorStore"]
+__all__ = ['Database']

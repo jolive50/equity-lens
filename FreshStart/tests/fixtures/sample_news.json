@@ -1,0 +1,96 @@
+{
+  "ticker": "AAPL",
+  "description": "Sample news articles for testing sentiment analysis",
+  "articles": [
+    {
+      "title": "Apple Reports Record Q4 Earnings, Beats Analyst Expectations",
+      "url": "https://finance.example.com/apple-q4-earnings-2024",
+      "published_at": "2024-11-09T14:30:00Z",
+      "source": "Financial Times",
+      "summary": "Apple Inc. reported better-than-expected quarterly results with iPhone sales surging and strong growth in services revenue. The company's earnings per share came in at $1.64, beating Wall Street estimates of $1.60.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.85
+    },
+    {
+      "title": "Apple's New AI Features Drive Strong iPhone 15 Demand",
+      "url": "https://tech.example.com/apple-ai-iphone-demand",
+      "published_at": "2024-11-08T10:15:00Z",
+      "source": "TechCrunch",
+      "summary": "The integration of advanced AI capabilities in iPhone 15 has led to unprecedented demand, with pre-orders exceeding expectations. Analysts predict this could be Apple's strongest product cycle in years.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.78
+    },
+    {
+      "title": "Supply Chain Concerns May Impact Apple's Holiday Quarter",
+      "url": "https://business.example.com/apple-supply-chain-worries",
+      "published_at": "2024-11-07T09:45:00Z",
+      "source": "Bloomberg",
+      "summary": "Industry sources report potential supply chain disruptions that could affect Apple's ability to meet holiday demand. Component shortages in Asia may lead to production delays.",
+      "sentiment_label": "negative",
+      "sentiment_score": -0.42
+    },
+    {
+      "title": "Apple Services Revenue Reaches All-Time High",
+      "url": "https://finance.example.com/apple-services-growth",
+      "published_at": "2024-11-06T16:20:00Z",
+      "source": "Reuters",
+      "summary": "Apple's services division, including App Store, Apple Music, and iCloud, generated record revenue this quarter. The high-margin services business continues to be a major growth driver.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.72
+    },
+    {
+      "title": "Regulatory Scrutiny Increases for Apple's App Store Policies",
+      "url": "https://news.example.com/apple-regulation-app-store",
+      "published_at": "2024-11-05T11:30:00Z",
+      "source": "Wall Street Journal",
+      "summary": "European regulators are intensifying their investigation into Apple's App Store practices, potentially leading to significant fines and mandatory policy changes. This adds to ongoing antitrust concerns.",
+      "sentiment_label": "negative",
+      "sentiment_score": -0.55
+    },
+    {
+      "title": "Apple Vision Pro Pre-Orders Exceed Expectations in Key Markets",
+      "url": "https://tech.example.com/vision-pro-preorders",
+      "published_at": "2024-11-04T13:00:00Z",
+      "source": "The Verge",
+      "summary": "Apple's mixed reality headset is seeing strong initial demand in major markets, with pre-orders selling out quickly. Industry analysts view this as validation of Apple's spatial computing vision.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.68
+    },
+    {
+      "title": "Market Volatility Impacts Tech Stocks, Apple Included",
+      "url": "https://markets.example.com/tech-volatility-impact",
+      "published_at": "2024-11-03T08:15:00Z",
+      "source": "CNBC",
+      "summary": "Broader market concerns about interest rates and economic uncertainty have led to increased volatility in tech stocks. Apple shares have experienced fluctuations alongside the overall sector.",
+      "sentiment_label": "neutral",
+      "sentiment_score": -0.15
+    },
+    {
+      "title": "Apple Expands Manufacturing Operations in India",
+      "url": "https://business.example.com/apple-india-expansion",
+      "published_at": "2024-11-02T15:45:00Z",
+      "source": "Economic Times",
+      "summary": "Apple is significantly expanding its production capacity in India as part of its supply chain diversification strategy. The move is expected to reduce dependency on China and improve operational resilience.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.65
+    },
+    {
+      "title": "Apple Announces Sustainability Initiative, Commits to Carbon Neutrality",
+      "url": "https://green.example.com/apple-carbon-neutral",
+      "published_at": "2024-11-01T12:00:00Z",
+      "source": "Environmental News",
+      "summary": "Apple unveiled ambitious plans to achieve complete carbon neutrality across its entire supply chain and product lifecycle by 2030. The initiative includes significant investments in renewable energy.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.58
+    },
+    {
+      "title": "Analysts Raise Apple Price Targets Following Strong Performance",
+      "url": "https://finance.example.com/apple-analyst-upgrades",
+      "published_at": "2024-10-31T14:30:00Z",
+      "source": "MarketWatch",
+      "summary": "Multiple Wall Street analysts have raised their price targets for Apple stock, citing strong fundamentals, growing services revenue, and positive momentum in iPhone sales. Average target now stands at $220.",
+      "sentiment_label": "positive",
+      "sentiment_score": 0.82
+    }
+  ]
+}

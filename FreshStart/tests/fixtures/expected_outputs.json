@@ -1,0 +1,57 @@
+{
+  "description": "Expected outputs for various test scenarios",
+  "prediction_outputs": {
+    "AAPL_uptrend": {
+      "direction": "up",
+      "confidence_range": [0.6, 0.9],
+      "model": "LSTM"
+    },
+    "AAPL_downtrend": {
+      "direction": "down",
+      "confidence_range": [0.6, 0.9],
+      "model": "LSTM"
+    }
+  },
+  "sentiment_outputs": {
+    "positive_news": {
+      "label": "positive",
+      "score_range": [0.5, 1.0],
+      "models": ["FinBERT", "RoBERTa", "VADER", "TextBlob"]
+    },
+    "negative_news": {
+      "label": "negative",
+      "score_range": [-1.0, -0.3],
+      "models": ["FinBERT", "RoBERTa", "VADER", "TextBlob"]
+    },
+    "neutral_news": {
+      "label": "neutral",
+      "score_range": [-0.3, 0.3],
+      "models": ["FinBERT", "RoBERTa", "VADER", "TextBlob"]
+    }
+  },
+  "workflow_outputs": {
+    "complete_analysis": {
+      "required_fields": [
+        "ticker",
+        "prediction",
+        "sentiment",
+        "explanation"
+      ],
+      "prediction_fields": [
+        "direction",
+        "confidence",
+        "model"
+      ],
+      "sentiment_fields": [
+        "label",
+        "score",
+        "model"
+      ]
+    }
+  },
+  "database_outputs": {
+    "price_cache_count": 30,
+    "news_cache_count": 10,
+    "cache_hit_expected": true
+  }
+}
