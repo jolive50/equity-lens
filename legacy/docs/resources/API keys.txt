@@ -1,4 +1,0 @@
-Alpha Vantage! Your API key is: TKL8YS43GMNA1BYD
-Tiingo! Your API key is: 01163c25587928b9b80c53f37d946a76460a1f2f
-finnhub! Your API key is: d3a2f59r01qli8jccd0gd3a2f59r01qli8jccd10
-newsapi: Your API key is: 6fb3385bef034fcea2afabf02a2365fe
