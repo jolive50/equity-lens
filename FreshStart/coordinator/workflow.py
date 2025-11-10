@@ -86,8 +86,20 @@ def create_freshstart_workflow(
             state["market_data"] = []
             state["fundamentals"] = {}
 
-        # Fetch news data (placeholder - TAE's responsibility)
-        state["news_data"] = []
+        # Fetch news data using Tae's NewsDataFetcher
+        try:
+            from data.fetchers.news_data import NewsDataFetcher
+
+            news_fetcher = NewsDataFetcher()
+            news_articles = news_fetcher.fetch_news(ticker, limit=50)
+            state["news_data"] = news_articles
+
+            logger.info(f"Fetched {len(news_articles)} news articles for {ticker}")
+
+        except Exception as e:
+            logger.error(f"Failed to fetch news: {e}")
+            state["warnings"].append(f"News fetch error: {str(e)}")
+            state["news_data"] = []
 
         return state
 
