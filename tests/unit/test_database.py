@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def test_database_initialization(test_db):
@@ -78,6 +78,23 @@ def test_get_cached_news_with_limit(test_db, sample_news_data, mock_ticker):
     cached_news = test_db.get_cached_news(mock_ticker, limit=limit)
 
     assert len(cached_news) <= limit
+
+
+def test_get_cached_news_max_age_filter(test_db, sample_news_data, mock_ticker):
+    """Test that cached news respects max_age_minutes filter."""
+    test_db.cache_news(mock_ticker, sample_news_data)
+
+    # Mark cached rows as old
+    cutoff = (datetime.utcnow() - timedelta(minutes=90)).isoformat()
+    with test_db._get_connection() as conn:
+        conn.execute(
+            "UPDATE news_cache SET fetched_at = ? WHERE ticker = ?",
+            (cutoff, mock_ticker)
+        )
+        conn.commit()
+
+    cached_news = test_db.get_cached_news(mock_ticker, max_age_minutes=30)
+    assert len(cached_news) == 0
 
 
 def test_cache_news_empty_list(test_db, mock_ticker):

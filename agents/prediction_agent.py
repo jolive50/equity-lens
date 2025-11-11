@@ -36,6 +36,11 @@ class PredictionAgent:
         if self.model is None:
             self._load_default_model()
 
+        if self.model is not None:
+            logger.info("PredictionAgent initialized with %s", self.model.__class__.__name__)
+        else:
+            logger.warning("PredictionAgent initialized without a backing model")
+
     def _load_default_model(self):
         """Load default prediction model (LSTM)."""
         try:
@@ -65,6 +70,13 @@ class PredictionAgent:
         if self.model is None:
             raise RuntimeError("No prediction model loaded")
 
+        logger.info(
+            "PredictionAgent running for %s (%d market rows, %d fundamentals)",
+            ticker,
+            len(market_data),
+            len(fundamentals),
+        )
+
         # Convert market_data to DataFrame
         df = pd.DataFrame(market_data)
 
@@ -80,13 +92,22 @@ class PredictionAgent:
             # Generate narrative
             narrative = self._generate_narrative(ticker, result, fundamentals)
 
-            return PredictionAgentResult(
+            prediction = PredictionAgentResult(
                 direction=result.direction,
                 confidence=result.confidence,
                 narrative=narrative,
                 probabilities=result.probabilities,
                 metadata=result.metadata
             )
+
+            logger.info(
+                "PredictionAgent result for %s: %s @ %.1f%% confidence",
+                ticker,
+                prediction.direction,
+                prediction.confidence * 100,
+            )
+
+            return prediction
 
         except Exception as e:
             logger.error(f"Prediction failed for {ticker}: {e}")

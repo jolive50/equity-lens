@@ -2,7 +2,7 @@ import sqlite3
 import json
 from pathlib import Path
 from typing import List, Dict, Optional, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 
 
@@ -109,15 +109,26 @@ class Database:
             conn.commit()
         return inserted
 
-    def get_cached_news(self, ticker: str, limit: Optional[int] = 50) -> List[Dict[str, Any]]:
+    def get_cached_news(
+        self,
+        ticker: str,
+        limit: Optional[int] = 50,
+        max_age_minutes: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         query = """
             SELECT title, url, published_at, source, summary,
-                   sentiment_label, sentiment_score
+                   sentiment_label, sentiment_score, fetched_at
             FROM news_cache
             WHERE ticker = ?
-            ORDER BY published_at DESC
         """
         params = [ticker]
+
+        if max_age_minutes is not None:
+            cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
+            query += " AND fetched_at >= ?"
+            params.append(cutoff.isoformat())
+
+        query += " ORDER BY published_at DESC"
 
         if limit:
             query += " LIMIT ?"
