@@ -17,7 +17,7 @@ from agents.sentiment_agent import SentimentAgent
 from storage.database import Database
 from storage.vector_store import NewsVectorStore
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("freshstart.coordinator")
 
 _db_client: Optional[Database] = None
 _db_init_failed = False
@@ -303,7 +303,7 @@ def create_freshstart_workflow(
         return state
 
     def fetch_data(state: StockAnalysisState) -> StockAnalysisState:
-        """Fetch market and news data."""
+        """Fetch market and news data with SQLite caching."""
         ticker = state["ticker"]
 
         from data.fetchers.price_data import get_fundamentals, get_historical_data

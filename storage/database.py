@@ -1,9 +1,12 @@
 import sqlite3
 import json
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
+
+logger = logging.getLogger("freshstart.storage")
 
 
 class Database:
@@ -20,6 +23,8 @@ class Database:
             with open(schema_path, 'r') as f:
                 conn.executescript(f.read())
 
+        logger.info(f"Database initialized at {self.db_path}")
+
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -27,11 +32,13 @@ class Database:
 
     def cache_prices(self, ticker: str, price_data: pd.DataFrame) -> int:
         if price_data.empty:
+            logger.warning(f"Attempted to cache empty price data for {ticker}")
             return 0
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             inserted = 0
+            errors = 0
             for idx, row in price_data.iterrows():
                 try:
                     cursor.execute("""
@@ -50,14 +57,52 @@ class Database:
                     ))
                     inserted += 1
                 except Exception as e:
-                    continue
+                    logger.error(f"Failed to insert price row for {ticker} on {idx}: {e}")
+                    errors += 1
             conn.commit()
+
+        logger.info(f"Cached {inserted} price rows for {ticker} ({errors} errors)")
         return inserted
+
+    def is_price_cache_fresh(self, ticker: str, max_age_hours: int = 1) -> bool:
+        """Check if cached price data is fresh enough.
+
+        Args:
+            ticker: Stock ticker symbol
+            max_age_hours: Maximum age in hours (default 1 hour)
+
+        Returns:
+            True if cache exists and is fresh, False otherwise
+        """
+        query = """
+            SELECT MAX(fetched_at) as last_fetch
+            FROM price_cache
+            WHERE ticker = ?
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (ticker,))
+            row = cursor.fetchone()
+
+        if not row or not row['last_fetch']:
+            logger.debug(f"No cache found for {ticker} prices")
+            return False
+
+        last_fetch = datetime.fromisoformat(row['last_fetch'])
+        age = datetime.now() - last_fetch
+        is_fresh = age < timedelta(hours=max_age_hours)
+
+        if is_fresh:
+            logger.debug(f"Price cache for {ticker} is fresh (age: {age.total_seconds():.0f}s)")
+        else:
+            logger.info(f"Price cache for {ticker} is stale (age: {age.total_seconds():.0f}s, max: {max_age_hours}h)")
+
+        return is_fresh
 
     def get_cached_prices(self, ticker: str, start_date: Optional[str] = None,
                           end_date: Optional[str] = None) -> pd.DataFrame:
         query = "SELECT * FROM price_cache WHERE ticker = ?"
-        params = [ticker]
+        params: List[Any] = [ticker]
 
         if start_date:
             query += " AND date >= ?"
@@ -72,19 +117,23 @@ class Database:
             df = pd.read_sql_query(query, conn, params=params)
 
         if df.empty:
+            logger.info(f"Cache MISS for {ticker} prices (no cached data)")
             return pd.DataFrame()
 
+        logger.info(f"Cache HIT for {ticker} prices ({len(df)} rows found)")
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date', inplace=True)
         return df[['open', 'high', 'low', 'close', 'volume']]
 
     def cache_news(self, ticker: str, news_articles: List[Dict[str, Any]]) -> int:
         if not news_articles:
+            logger.warning(f"Attempted to cache empty news data for {ticker}")
             return 0
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             inserted = 0
+            errors = 0
             for article in news_articles:
                 try:
                     cursor.execute("""
@@ -104,10 +153,42 @@ class Database:
                         datetime.now().isoformat()
                     ))
                     inserted += 1
-                except Exception:
-                    continue
+                except Exception as e:
+                    logger.error(f"Failed to insert news article for {ticker}: {e}")
+                    errors += 1
             conn.commit()
+
+        logger.info(f"Cached {inserted} news articles for {ticker} ({errors} errors)")
         return inserted
+
+    def is_news_cache_fresh(self, ticker: str, max_age_hours: int = 1) -> bool:
+        """Check if cached news data is fresh enough."""
+        query = """
+            SELECT MAX(fetched_at) as last_fetch
+            FROM news_cache
+            WHERE ticker = ?
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (ticker,))
+            row = cursor.fetchone()
+
+        if not row or not row['last_fetch']:
+            logger.debug(f"No cache found for {ticker} news")
+            return False
+
+        last_fetch = datetime.fromisoformat(row['last_fetch'])
+        age = datetime.now() - last_fetch
+        is_fresh = age < timedelta(hours=max_age_hours)
+
+        if is_fresh:
+            logger.debug(f"News cache for {ticker} is fresh (age: {age.total_seconds():.0f}s)")
+        else:
+            logger.info(
+                f"News cache for {ticker} is stale (age: {age.total_seconds():.0f}s, max: {max_age_hours}h)"
+            )
+
+        return is_fresh
 
     def get_cached_news(
         self,
@@ -121,10 +202,10 @@ class Database:
             FROM news_cache
             WHERE ticker = ?
         """
-        params = [ticker]
+        params: List[Any] = [ticker]
 
         if max_age_minutes is not None:
-            cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
+            cutoff = datetime.now() - timedelta(minutes=max_age_minutes)
             query += " AND fetched_at >= ?"
             params.append(cutoff.isoformat())
 
@@ -139,7 +220,13 @@ class Database:
             cursor.execute(query, params)
             rows = cursor.fetchall()
 
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        if result:
+            logger.info(f"Cache HIT for {ticker} news ({len(result)} articles found)")
+        else:
+            logger.info(f"Cache MISS for {ticker} news (no cached data)")
+
+        return result
 
     def save_analysis(self, ticker: str, analysis_data: Dict[str, Any]) -> int:
         with self._get_connection() as conn:
@@ -163,7 +250,11 @@ class Database:
                 json.dumps(analysis_data.get('raw_data', {}))
             ))
             conn.commit()
-            return cursor.lastrowid
+            row_id = cursor.lastrowid
+
+        if row_id is None:
+            raise RuntimeError("Failed to persist analysis result")
+        return int(row_id)
 
     def get_analysis_history(self, ticker: str, limit: Optional[int] = 10) -> List[Dict[str, Any]]:
         query = """
@@ -171,7 +262,7 @@ class Database:
             WHERE ticker = ?
             ORDER BY analysis_date DESC
         """
-        params = [ticker]
+        params: List[Any] = [ticker]
 
         if limit:
             query += " LIMIT ?"
