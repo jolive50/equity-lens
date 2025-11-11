@@ -13,7 +13,7 @@ from agents.sentiment_agent import SentimentAgent
 from agents.reflection_agent import ReflectionAgent
 from agents.explanation_agent import ExplanationAgent
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("freshstart.coordinator")
 
 
 class StockAnalysisState(TypedDict, total=False):
@@ -65,36 +65,100 @@ def create_freshstart_workflow(
         return state
 
     def fetch_data(state: StockAnalysisState) -> StockAnalysisState:
-        """Fetch market and news data."""
+        """Fetch market and news data with SQLite caching."""
         ticker = state["ticker"]
+        from storage.database import Database
+        from storage.vector_store import VectorStore
 
-        # Fetch price data
+        db = Database()
+        logger.info("SQLite caching enabled")
+
+        # Fetch price data (check cache first)
         try:
             from data.fetchers.price_data import get_historical_data, get_fundamentals
+            import pandas as pd
 
-            market_data = get_historical_data(ticker, period="3mo")
+            # Check if cached price data is fresh
+            if db.is_price_cache_fresh(ticker, max_age_hours=1):
+                cached_df = db.get_cached_prices(ticker)
+                if not cached_df.empty:
+                    # Convert DataFrame to list of dicts for workflow
+                    market_data = [
+                        {
+                            'date': str(idx),
+                            'Open': row['open'],
+                            'High': row['high'],
+                            'Low': row['low'],
+                            'Close': row['close'],
+                            'Volume': row['volume']
+                        }
+                        for idx, row in cached_df.iterrows()
+                    ]
+                    state["market_data"] = market_data
+                    logger.info(f"Using cached price data for {ticker} ({len(market_data)} days)")
+                else:
+                    raise ValueError("Empty cached data")
+            else:
+                # Cache miss or stale - fetch fresh data
+                market_data = get_historical_data(ticker, period="3mo")
+                state["market_data"] = market_data
+                logger.info(f"Fetched {len(market_data)} days of data for {ticker}")
+
+                # Cache the fetched data
+                if market_data:
+                    df = pd.DataFrame(market_data)
+                    if 'date' in df.columns:
+                        df.set_index('date', inplace=True)
+                    db.cache_prices(ticker, df)
+
+            # Always fetch fresh fundamentals (they change less frequently)
             fundamentals = get_fundamentals(ticker)
-
-            state["market_data"] = market_data
             state["fundamentals"] = fundamentals
-
-            logger.info(f"Fetched {len(market_data)} days of data for {ticker}")
+            logger.info(f"Fetched {len(fundamentals)} fundamental metrics for {ticker}")
 
         except Exception as e:
-            logger.error(f"Failed to fetch data: {e}")
+            logger.error(f"Failed to fetch price data: {e}")
             state["warnings"].append(f"Data fetch error: {str(e)}")
             state["market_data"] = []
             state["fundamentals"] = {}
 
-        # Fetch news data using Tae's NewsDataFetcher
+        # Fetch news data with caching
         try:
             from data.fetchers.news_data import NewsDataFetcher
 
-            news_fetcher = NewsDataFetcher()
-            news_articles = news_fetcher.fetch_news(ticker, limit=50)
-            state["news_data"] = news_articles
+            # Check if cached news is fresh
+            if db.is_news_cache_fresh(ticker, max_age_hours=1):
+                cached_news = db.get_cached_news(ticker, limit=50)
+                if cached_news:
+                    state["news_data"] = cached_news
+                    logger.info(f"Using cached news for {ticker} ({len(cached_news)} articles)")
+                else:
+                    raise ValueError("Empty cached news")
+            else:
+                # Cache miss or stale - fetch fresh news
+                news_fetcher = NewsDataFetcher()
+                news_articles = news_fetcher.fetch_news(ticker, limit=50)
+                state["news_data"] = news_articles
+                logger.info(f"Fetched {len(news_articles)} news articles for {ticker}")
 
-            logger.info(f"Fetched {len(news_articles)} news articles for {ticker}")
+                # Cache the fetched news
+                if news_articles:
+                    db.cache_news(ticker, news_articles)
+
+            # Index news in ChromaDB vector store
+            try:
+                vector_store = VectorStore()
+                logger.info("ChromaDB vector store enabled")
+                for article in state["news_data"]:
+                    vector_store.add_document(
+                        ticker=ticker,
+                        doc_id=article.get('url', ''),
+                        text=f"{article.get('title', '')} {article.get('summary', '')}",
+                        metadata=article
+                    )
+                logger.info(f"Indexed {len(state['news_data'])} news articles for {ticker}")
+            except Exception as e:
+                logger.warning(f"ChromaDB indexing failed (non-critical): {e}")
 
         except Exception as e:
             logger.error(f"Failed to fetch news: {e}")
