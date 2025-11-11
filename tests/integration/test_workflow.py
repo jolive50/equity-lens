@@ -56,11 +56,110 @@ class TestWorkflowExecution:
     @patch('coordinator.workflow.get_fundamentals')
     def test_workflow_execution_success(self, mock_fundamentals, mock_prices, mock_agents, sample_price_data):
         """Test successful workflow execution."""
-        pytest.skip("Full workflow execution test - requires all components integrated")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        # Mock data fetchers
+        mock_prices.return_value = [
+            {"date": "2024-01-01", "open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000000}
+        ]
+        mock_fundamentals.return_value = {"pe_ratio": 25.5, "eps": 4.0}
+
+        # Mock agent responses
+        mock_agents['prediction'].run.return_value = PredictionResult(
+            direction="up",
+            confidence=0.75,
+            narrative="Strong momentum",
+            probabilities={"up": 0.75, "down": 0.15, "neutral": 0.10},
+            metadata={"model": "LSTM"}
+        )
+
+        mock_agents['sentiment'].run.return_value = SentimentResult(
+            current="positive",
+            score=0.65,
+            trend="improving",
+            headlines=[{"title": "Good news", "sentiment": "positive"}]
+        )
+
+        mock_agents['reflection'].run.return_value = {
+            "validation_passed": True,
+            "issues": []
+        }
+
+        mock_agents['explanation'].run.return_value = "Analysis complete"
+
+        # Create and run workflow
+        workflow = create_freshstart_workflow(
+            mock_agents['prediction'],
+            mock_agents['sentiment'],
+            mock_agents['reflection'],
+            mock_agents['explanation']
+        ).compile()
+
+        result = workflow.invoke({"ticker": "AAPL"})
+
+        # Verify workflow executed all nodes
+        assert result["ticker"] == "AAPL"
+        assert "prediction_result" in result
+        assert "sentiment_result" in result
+        assert result["prediction_result"]["direction"] == "up"
+        assert result["sentiment_result"]["current"] == "positive"
 
     def test_workflow_state_management(self):
         """Test that workflow properly manages state between nodes."""
-        pytest.skip("Workflow state management test - requires workflow integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        # Create mock agents
+        prediction_agent = Mock()
+        sentiment_agent = Mock()
+        reflection_agent = Mock()
+        explanation_agent = Mock()
+
+        # Setup mock responses
+        prediction_agent.run.return_value = PredictionResult(
+            direction="up",
+            confidence=0.80,
+            narrative="Test",
+            probabilities={"up": 0.8, "down": 0.1, "neutral": 0.1},
+            metadata={}
+        )
+
+        sentiment_agent.run.return_value = SentimentResult(
+            current="positive",
+            score=0.70,
+            trend="stable",
+            headlines=[]
+        )
+
+        reflection_agent.run.return_value = {
+            "validation_passed": True,
+            "issues": []
+        }
+
+        explanation_agent.run.return_value = "Test explanation"
+
+        # Create workflow
+        workflow = create_freshstart_workflow(
+            prediction_agent,
+            sentiment_agent,
+            reflection_agent,
+            explanation_agent
+        ).compile()
+
+        # Run with minimal state
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "TEST"})
+
+            # Verify state is maintained through workflow
+            assert result["ticker"] == "TEST"
+            assert "warnings" in result
+            assert isinstance(result["warnings"], list)
+            assert "confidence_level" in result
 
     def test_workflow_handles_invalid_ticker(self, mock_agents):
         """Test workflow handles invalid ticker input."""
@@ -69,57 +168,311 @@ class TestWorkflowExecution:
             mock_agents['sentiment'],
             mock_agents['reflection'],
             mock_agents['explanation']
-        )
+        ).compile()
 
-        initial_state = StockAnalysisState(ticker="")
-
+        # Empty ticker should raise ValueError
         with pytest.raises(ValueError, match="Ticker is required"):
-            # This would execute the validate_input node
-            pass
+            workflow.invoke({"ticker": ""})
 
 
 class TestWorkflowDataFlow:
     """Test data flow through workflow nodes."""
 
-    def test_fetch_data_node_calls_fetchers(self):
+    @patch('coordinator.workflow.get_historical_data')
+    @patch('coordinator.workflow.get_fundamentals')
+    def test_fetch_data_node_calls_fetchers(self, mock_fundamentals, mock_prices):
         """Test that fetch_data node calls price and news fetchers."""
-        pytest.skip("Data fetching node test - requires fetcher integration")
+        mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+        mock_fundamentals.return_value = {"pe_ratio": 20.0}
+
+        # Create mock agents
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.7, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.6, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        result = workflow.invoke({"ticker": "AAPL"})
+
+        # Verify data was fetched
+        assert mock_prices.called
+        assert mock_fundamentals.called
+        assert "market_data" in result
+        assert "fundamentals" in result
 
     def test_prediction_node_calls_prediction_agent(self):
         """Test that prediction node calls PredictionAgent."""
-        pytest.skip("Prediction node test - requires agent integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.75, "Strong", {"up": 0.75}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.6, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Verify prediction agent was called
+            assert prediction_agent.run.called
+            assert result["prediction_result"]["direction"] == "up"
 
     def test_sentiment_node_calls_sentiment_agent(self):
         """Test that sentiment node calls SentimentAgent."""
-        pytest.skip("Sentiment node test - requires agent integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.7, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.65, "improving", [{"title": "Good news"}])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Verify sentiment agent was called
+            assert sentiment_agent.run.called
+            assert result["sentiment_result"]["current"] == "positive"
 
     def test_reflection_node_validates_results(self):
         """Test that reflection node validates prediction/sentiment results."""
-        pytest.skip("Reflection node test - requires agent integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.7, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.6, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": False, "issues": ["Test issue"]}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Verify reflection was called and validation failed
+            assert reflection_agent.run.called
+            assert result["confidence_level"] == "low"
+            assert "Test issue" in result["warnings"]
 
     def test_explanation_node_generates_narrative(self):
         """Test that explanation node generates narrative explanation."""
-        pytest.skip("Explanation node test - requires agent integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.7, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.6, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Detailed explanation for the user"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Verify explanation was generated
+            assert explanation_agent.run.called
+            assert result["explanation"] == "Detailed explanation for the user"
 
 
 class TestWorkflowErrorHandling:
     """Test workflow error handling."""
 
-    def test_workflow_handles_data_fetch_failure(self):
+    @patch('coordinator.workflow.get_historical_data')
+    @patch('coordinator.workflow.get_fundamentals')
+    def test_workflow_handles_data_fetch_failure(self, mock_fundamentals, mock_prices):
         """Test workflow handles data fetching failures."""
-        pytest.skip("Error handling test - requires workflow integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        # Simulate fetch failure
+        mock_prices.side_effect = Exception("API unavailable")
+        mock_fundamentals.return_value = {}
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("neutral", 0.5, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("neutral", 0.5, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        result = workflow.invoke({"ticker": "AAPL"})
+
+        # Workflow should continue with warnings
+        assert "warnings" in result
+        assert any("error" in w.lower() for w in result["warnings"])
 
     def test_workflow_handles_prediction_failure(self):
         """Test workflow continues when prediction fails."""
-        pytest.skip("Error handling test - requires workflow integration")
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.side_effect = Exception("Model unavailable")
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.6, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Should have fallback prediction
+            assert result["prediction_result"]["direction"] == "neutral"
+            assert any("Prediction error" in w for w in result["warnings"])
 
     def test_workflow_handles_sentiment_failure(self):
         """Test workflow continues when sentiment fails."""
-        pytest.skip("Error handling test - requires workflow integration")
+        from agents.prediction_agent import PredictionResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.7, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.side_effect = Exception("Sentiment model failed")
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": True, "issues": []}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Should have fallback sentiment
+            assert result["sentiment_result"]["current"] == "neutral"
+            assert any("Sentiment error" in w for w in result["warnings"])
 
     def test_workflow_collects_warnings(self):
         """Test that workflow collects warnings from all nodes."""
-        pytest.skip("Warning collection test - requires workflow integration")
+        from agents.prediction_agent import PredictionResult
+        from agents.sentiment_agent import SentimentResult
+
+        prediction_agent = Mock()
+        prediction_agent.run.return_value = PredictionResult("up", 0.7, "test", {}, {})
+
+        sentiment_agent = Mock()
+        sentiment_agent.run.return_value = SentimentResult("positive", 0.6, "stable", [])
+
+        reflection_agent = Mock()
+        reflection_agent.run.return_value = {"validation_passed": False, "issues": ["Warning 1", "Warning 2"]}
+
+        explanation_agent = Mock()
+        explanation_agent.run.return_value = "Test"
+
+        workflow = create_freshstart_workflow(
+            prediction_agent, sentiment_agent, reflection_agent, explanation_agent
+        ).compile()
+
+        with patch('coordinator.workflow.get_historical_data') as mock_prices, \
+             patch('coordinator.workflow.get_fundamentals') as mock_fundamentals:
+            mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+            mock_fundamentals.return_value = {}
+
+            result = workflow.invoke({"ticker": "AAPL"})
+
+            # Should collect all warnings
+            assert "warnings" in result
+            assert "Warning 1" in result["warnings"]
+            assert "Warning 2" in result["warnings"]
 
 
 class TestWorkflowCaching:

@@ -10,32 +10,83 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 class TestFullUserWorkflow:
     """End-to-end tests simulating complete user workflows."""
 
-    def test_e2e_stock_analysis_happy_path(self):
+    @patch('coordinator.workflow.get_historical_data')
+    @patch('coordinator.workflow.get_fundamentals')
+    @patch('coordinator.workflow.NewsDataFetcher')
+    def test_e2e_stock_analysis_happy_path(self, mock_news_fetcher, mock_fundamentals, mock_prices):
         """
-        Test complete user workflow from frontend to final results.
+        Test complete user workflow from API to final results.
 
         Flow:
-        1. User enters ticker in Next.js frontend
-        2. Frontend calls FastAPI /analyze endpoint
-        3. API calls LangGraph workflow
-        4. Workflow fetches data (checks cache first)
-        5. Workflow runs prediction agent
-        6. Workflow runs sentiment agent
-        7. Workflow runs reflection agent
-        8. Workflow runs explanation agent
-        9. Results returned to API
-        10. API saves to database
-        11. Frontend displays results
+        1. API receives request
+        2. API calls LangGraph workflow
+        3. Workflow fetches data (mocked)
+        4. Workflow runs prediction agent (mocked)
+        5. Workflow runs sentiment agent (mocked)
+        6. Workflow runs reflection agent (mocked)
+        7. Workflow runs explanation agent (mocked)
+        8. Results returned to API
+        9. API formats response
         """
-        pytest.skip("E2E test requires all components (Frontend, API, Workflow, Agents, Models)")
+        from fastapi.testclient import TestClient
+        from api.main import app
+
+        # Mock data fetchers
+        mock_prices.return_value = [
+            {"date": "2024-01-01", "open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000000}
+        ]
+        mock_fundamentals.return_value = {"pe_ratio": 25.5}
+
+        mock_news_instance = Mock()
+        mock_news_instance.fetch_news.return_value = []
+        mock_news_fetcher.return_value = mock_news_instance
+
+        # Mock agents through workflow
+        with patch('coordinator.workflow.PredictionAgent') as mock_pred_agent, \
+             patch('coordinator.workflow.SentimentAgent') as mock_sent_agent, \
+             patch('coordinator.workflow.ReflectionAgent') as mock_refl_agent, \
+             patch('coordinator.workflow.ExplanationAgent') as mock_expl_agent:
+
+            from agents.prediction_agent import PredictionResult
+            from agents.sentiment_agent import SentimentResult
+
+            mock_pred_instance = Mock()
+            mock_pred_instance.run.return_value = PredictionResult("up", 0.75, "Strong", {"up": 0.75}, {})
+            mock_pred_agent.return_value = mock_pred_instance
+
+            mock_sent_instance = Mock()
+            mock_sent_instance.run.return_value = SentimentResult("positive", 0.65, "improving", [])
+            mock_sent_agent.return_value = mock_sent_instance
+
+            mock_refl_instance = Mock()
+            mock_refl_instance.run.return_value = {"validation_passed": True, "issues": []}
+            mock_refl_agent.return_value = mock_refl_instance
+
+            mock_expl_instance = Mock()
+            mock_expl_instance.run.return_value = "Complete analysis for AAPL"
+            mock_expl_agent.return_value = mock_expl_instance
+
+            # Make API request
+            client = TestClient(app)
+            response = client.post("/analyze", json={"ticker": "AAPL"})
+
+            # Verify complete workflow executed
+            assert response.status_code == 200
+            data = response.json()
+            assert data["ticker"] == "AAPL"
+            assert data["prediction"]["direction"] == "up"
+            assert data["sentiment"]["label"] == "positive"
+            assert "explanation" in data
 
     def test_e2e_with_cached_data(self, test_db, sample_price_data, sample_news_data, mock_ticker):
         """Test E2E workflow using cached data (no API calls needed)."""
-        pytest.skip("E2E caching test requires full integration")
+        # This would require full database integration
+        pytest.skip("Requires full database integration with workflow")
 
     def test_e2e_with_fresh_data(self):
         """Test E2E workflow fetching fresh data from APIs."""
-        pytest.skip("E2E fresh data test requires API integration")
+        # This would require actual API calls or comprehensive mocking
+        pytest.skip("Requires actual API integration or comprehensive mocking")
 
 
 class TestE2EPerformance:
@@ -55,15 +106,105 @@ class TestE2EErrorScenarios:
 
     def test_e2e_invalid_ticker_returns_error(self):
         """Test that invalid ticker returns proper error message to user."""
-        pytest.skip("Error handling test requires API integration")
+        from fastapi.testclient import TestClient
+        from api.main import app
 
-    def test_e2e_api_failure_returns_graceful_error(self):
+        client = TestClient(app)
+
+        # Empty ticker should return validation error
+        response = client.post("/analyze", json={"ticker": ""})
+        assert response.status_code == 422
+
+        # Missing ticker should return validation error
+        response = client.post("/analyze", json={})
+        assert response.status_code == 422
+
+    @patch('coordinator.workflow.get_historical_data')
+    @patch('coordinator.workflow.get_fundamentals')
+    def test_e2e_api_failure_returns_graceful_error(self, mock_fundamentals, mock_prices):
         """Test graceful error when external APIs fail."""
-        pytest.skip("API failure test requires full integration")
+        from fastapi.testclient import TestClient
+        from api.main import app
 
-    def test_e2e_model_unavailable_uses_fallback(self):
+        # Mock API failure
+        mock_prices.side_effect = Exception("API unavailable")
+        mock_fundamentals.return_value = {}
+
+        with patch('coordinator.workflow.PredictionAgent') as mock_pred_agent, \
+             patch('coordinator.workflow.SentimentAgent') as mock_sent_agent, \
+             patch('coordinator.workflow.ReflectionAgent') as mock_refl_agent, \
+             patch('coordinator.workflow.ExplanationAgent') as mock_expl_agent:
+
+            from agents.prediction_agent import PredictionResult
+            from agents.sentiment_agent import SentimentResult
+
+            mock_pred_instance = Mock()
+            mock_pred_instance.run.return_value = PredictionResult("neutral", 0.5, "Limited data", {}, {})
+            mock_pred_agent.return_value = mock_pred_instance
+
+            mock_sent_instance = Mock()
+            mock_sent_instance.run.return_value = SentimentResult("neutral", 0.5, "stable", [])
+            mock_sent_agent.return_value = mock_sent_instance
+
+            mock_refl_instance = Mock()
+            mock_refl_instance.run.return_value = {"validation_passed": True, "issues": []}
+            mock_refl_agent.return_value = mock_refl_instance
+
+            mock_expl_instance = Mock()
+            mock_expl_instance.run.return_value = "Analysis with limited data"
+            mock_expl_agent.return_value = mock_expl_instance
+
+            client = TestClient(app)
+            response = client.post("/analyze", json={"ticker": "AAPL"})
+
+            # Should still return 200 with warnings
+            assert response.status_code == 200
+            data = response.json()
+            assert "warnings" in data
+            assert len(data["warnings"]) > 0
+
+    @patch('coordinator.workflow.get_historical_data')
+    @patch('coordinator.workflow.get_fundamentals')
+    def test_e2e_model_unavailable_uses_fallback(self, mock_fundamentals, mock_prices):
         """Test that system uses fallback when ML models unavailable."""
-        pytest.skip("Fallback test requires model integration")
+        from fastapi.testclient import TestClient
+        from api.main import app
+
+        mock_prices.return_value = [{"date": "2024-01-01", "open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000}]
+        mock_fundamentals.return_value = {}
+
+        with patch('coordinator.workflow.PredictionAgent') as mock_pred_agent, \
+             patch('coordinator.workflow.SentimentAgent') as mock_sent_agent, \
+             patch('coordinator.workflow.ReflectionAgent') as mock_refl_agent, \
+             patch('coordinator.workflow.ExplanationAgent') as mock_expl_agent:
+
+            from agents.sentiment_agent import SentimentResult
+
+            # Prediction agent fails
+            mock_pred_instance = Mock()
+            mock_pred_instance.run.side_effect = Exception("Model not available")
+            mock_pred_agent.return_value = mock_pred_instance
+
+            mock_sent_instance = Mock()
+            mock_sent_instance.run.return_value = SentimentResult("neutral", 0.5, "stable", [])
+            mock_sent_agent.return_value = mock_sent_instance
+
+            mock_refl_instance = Mock()
+            mock_refl_instance.run.return_value = {"validation_passed": True, "issues": []}
+            mock_refl_agent.return_value = mock_refl_instance
+
+            mock_expl_instance = Mock()
+            mock_expl_instance.run.return_value = "Analysis with fallback"
+            mock_expl_agent.return_value = mock_expl_instance
+
+            client = TestClient(app)
+            response = client.post("/analyze", json={"ticker": "AAPL"})
+
+            # Should still complete with fallback values
+            assert response.status_code == 200
+            data = response.json()
+            assert data["prediction"]["direction"] == "neutral"
+            assert any("Prediction error" in w for w in data["warnings"])
 
 
 class TestE2EDataConsistency:
