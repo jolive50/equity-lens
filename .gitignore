@@ -46,7 +46,7 @@ secrets.env
 *.sqlite3
 
 # ChromaDB
-data/chroma/
+db/chroma/
 
 # Logs
 *.log

@@ -10,7 +10,7 @@ logger = logging.getLogger("freshstart.storage")
 
 
 class Database:
-    def __init__(self, db_path: str = "freshstart.db"):
+    def __init__(self, db_path: str = "db/freshstart.db"):
         self.db_path = db_path
         self._connection_pool = []
         self._init_database()

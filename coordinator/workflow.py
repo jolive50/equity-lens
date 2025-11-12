@@ -572,6 +572,26 @@ def run_stock_analysis(
         "user_tier": user_tier
     })
 
+    # Save analysis to database
+    db = _get_db_client()
+    if db:
+        try:
+            analysis_data = {
+                "prediction_direction": result["prediction_result"]["direction"],
+                "prediction_confidence": result["prediction_result"]["confidence"],
+                "prediction_model": result["prediction_result"].get("model", "unknown"),
+                "sentiment_score": result["sentiment_result"]["score"],
+                "sentiment_label": result["sentiment_result"]["current"],
+                "sentiment_model": result["sentiment_result"].get("model", "unknown"),
+                "explanation": result["explanation"],
+                "reflection_warnings": "; ".join(result["warnings"]),
+                "raw_data": result
+            }
+            db.save_analysis(ticker.upper(), analysis_data)
+            logger.info(f"Saved analysis result for {ticker}")
+        except Exception as exc:
+            logger.warning(f"Failed to save analysis for {ticker}: {exc}")
+
     # Format response
     return {
         "ticker": result["ticker"],
