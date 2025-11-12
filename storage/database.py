@@ -36,6 +36,20 @@ class Database:
             logger.warning(f"Attempted to cache empty price data for {ticker}")
             return 0
 
+        logger.info(f"      📀 DATABASE: Caching price data for {ticker}")
+        logger.info(f"         → Rows to insert: {len(price_data)}")
+        logger.info(f"         → Date range: {price_data.index.min()} to {price_data.index.max()}")
+
+        # Log sample of first row
+        first_row = price_data.iloc[0]
+        logger.info(f"         → Sample data (first row):")
+        logger.info(f"            Date: {price_data.index[0]}")
+        logger.info(f"            Open: ${first_row.get('Open', 0):.2f}")
+        logger.info(f"            High: ${first_row.get('High', 0):.2f}")
+        logger.info(f"            Low: ${first_row.get('Low', 0):.2f}")
+        logger.info(f"            Close: ${first_row.get('Close', 0):.2f}")
+        logger.info(f"            Volume: {int(first_row.get('Volume', 0)):,}")
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             inserted = 0
@@ -62,7 +76,7 @@ class Database:
                     errors += 1
             conn.commit()
 
-        logger.info(f"Cached {inserted} price rows for {ticker} ({errors} errors)")
+        logger.info(f"      ✅ DATABASE: Cached {inserted} price rows for {ticker} ({errors} errors)")
         return inserted
 
     def is_price_cache_fresh(self, ticker: str, max_age_hours: int = 1) -> bool:
@@ -131,6 +145,17 @@ class Database:
             logger.warning(f"Attempted to cache empty news data for {ticker}")
             return 0
 
+        logger.info(f"      📀 DATABASE: Caching news articles for {ticker}")
+        logger.info(f"         → Articles to insert: {len(news_articles)}")
+
+        # Log sample of first article
+        first_article = news_articles[0]
+        logger.info(f"         → Sample article (first):")
+        logger.info(f"            Title: {first_article.get('title', 'N/A')[:60]}...")
+        logger.info(f"            Source: {first_article.get('source', 'N/A')}")
+        logger.info(f"            Published: {first_article.get('published_at', 'N/A')}")
+        logger.info(f"            Sentiment: {first_article.get('sentiment_label', 'N/A')} ({first_article.get('sentiment_score', 0):.2f})")
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             inserted = 0
@@ -159,7 +184,7 @@ class Database:
                     errors += 1
             conn.commit()
 
-        logger.info(f"Cached {inserted} news articles for {ticker} ({errors} errors)")
+        logger.info(f"      ✅ DATABASE: Cached {inserted} news articles for {ticker} ({errors} errors)")
         return inserted
 
     def is_news_cache_fresh(self, ticker: str, max_age_hours: int = 1) -> bool:
@@ -230,6 +255,16 @@ class Database:
         return result
 
     def save_analysis(self, ticker: str, analysis_data: Dict[str, Any]) -> int:
+        logger.info(f"\n      📀 DATABASE: Saving analysis result for {ticker}")
+        logger.info(f"         → Prediction Direction: {analysis_data.get('prediction_direction')}")
+        logger.info(f"         → Prediction Confidence: {analysis_data.get('prediction_confidence'):.1%}")
+        logger.info(f"         → Prediction Model: {analysis_data.get('prediction_model')}")
+        logger.info(f"         → Sentiment Label: {analysis_data.get('sentiment_label')}")
+        logger.info(f"         → Sentiment Score: {analysis_data.get('sentiment_score'):.2f}")
+        logger.info(f"         → Sentiment Model: {analysis_data.get('sentiment_model')}")
+        logger.info(f"         → Reflection Warnings: {analysis_data.get('reflection_warnings')}")
+        logger.info(f"         → Explanation Length: {len(analysis_data.get('explanation', ''))} chars")
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -252,6 +287,8 @@ class Database:
             ))
             conn.commit()
             row_id = cursor.lastrowid
+
+        logger.info(f"      ✅ DATABASE: Analysis saved with ID={row_id}")
 
         if row_id is None:
             raise RuntimeError("Failed to persist analysis result")

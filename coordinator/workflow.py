@@ -316,6 +316,9 @@ def create_freshstart_workflow(
         logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
         logger.info("│ 📊 NODE: fetch_data                                            │")
         logger.info("└─────────────────────────────────────────────────────────────────┘")
+        logger.info(f"   📥 INPUT STATE:")
+        logger.info(f"      Ticker: {state.get('ticker', 'N/A')}")
+        logger.info(f"      User Tier: {state.get('user_tier', 'N/A')}")
 
         ticker = state["ticker"]
 
@@ -417,6 +420,12 @@ def create_freshstart_workflow(
         logger.info(f"   ✅ Data fetch complete ({time.time() - node_start:.2f}s total)")
         logger.info(f"      Summary: {len(market_data)} price rows, {len(fundamentals)} metrics, {len(state.get('news_data', []))} articles")
 
+        logger.info(f"\n   📤 OUTPUT STATE:")
+        logger.info(f"      Market data: {len(market_data)} rows")
+        logger.info(f"      Fundamentals: {len(fundamentals)} metrics")
+        logger.info(f"      News data: {len(state.get('news_data', []))} articles")
+        logger.info(f"      Warnings: {len(state.get('warnings', []))}")
+
         return state
 
     def run_prediction(state: StockAnalysisState) -> StockAnalysisState:
@@ -429,7 +438,8 @@ def create_freshstart_workflow(
         logger.info("└─────────────────────────────────────────────────────────────────┘")
 
         try:
-            logger.info("   📊 Input data:")
+            logger.info("   📥 INPUT STATE:")
+            logger.info(f"      Ticker: {state.get('ticker', 'N/A')}")
             logger.info(f"      Market data: {len(state['market_data'])} rows")
             logger.info(f"      Fundamentals: {len(state['fundamentals'])} metrics")
 
@@ -452,6 +462,11 @@ def create_freshstart_workflow(
             logger.info(f"      Direction: {result.direction.upper()}")
             logger.info(f"      Confidence: {result.confidence:.1%}")
             logger.info(f"      Probabilities: ↑{result.probabilities['up']:.1%} ↓{result.probabilities['down']:.1%} →{result.probabilities.get('neutral', 0):.1%}")
+
+            logger.info(f"\n   📤 OUTPUT STATE:")
+            logger.info(f"      Prediction stored in state['prediction_result']")
+            logger.info(f"      Direction: {result.direction}")
+            logger.info(f"      Confidence: {result.confidence:.1%}")
 
         except Exception as e:
             logger.error(f"   ❌ Prediction failed ({time.time() - node_start:.2f}s): {e}")
@@ -476,8 +491,10 @@ def create_freshstart_workflow(
         logger.info("└─────────────────────────────────────────────────────────────────┘")
 
         try:
-            logger.info("   📰 Input data:")
+            logger.info("   📥 INPUT STATE:")
+            logger.info(f"      Ticker: {state.get('ticker', 'N/A')}")
             logger.info(f"      News articles: {len(state['news_data'])}")
+            logger.info(f"      Prediction direction: {state.get('prediction_result', {}).get('direction', 'N/A')}")
 
             result = sentiment_agent.run(
                 ticker=state["ticker"],
@@ -499,6 +516,12 @@ def create_freshstart_workflow(
             logger.info(f"      Score: {result.score:.2f} (0=negative, 0.5=neutral, 1=positive)")
             logger.info(f"      Trend: {result.trend}")
             logger.info(f"      Headlines analyzed: {len(result.headlines)}")
+
+            logger.info(f"\n   📤 OUTPUT STATE:")
+            logger.info(f"      Sentiment stored in state['sentiment_result']")
+            logger.info(f"      Current sentiment: {result.current}")
+            logger.info(f"      Score: {result.score:.2f}")
+            logger.info(f"      Trend: {result.trend}")
 
         except Exception as e:
             logger.error(f"   ❌ Sentiment analysis failed ({time.time() - node_start:.2f}s): {e}")
@@ -522,7 +545,10 @@ def create_freshstart_workflow(
         logger.info("└─────────────────────────────────────────────────────────────────┘")
 
         try:
-            logger.info("   🔎 Validating analysis quality...")
+            logger.info("   📥 INPUT STATE:")
+            logger.info(f"      Prediction: {state.get('prediction_result', {}).get('direction', 'N/A')} ({state.get('prediction_result', {}).get('confidence', 0):.1%})")
+            logger.info(f"      Sentiment: {state.get('sentiment_result', {}).get('current', 'N/A')} ({state.get('sentiment_result', {}).get('score', 0):.2f})")
+            logger.info(f"   🔎 Validating analysis quality...")
 
             result = reflection_agent.run(
                 prediction=state["prediction_result"],
@@ -555,6 +581,12 @@ def create_freshstart_workflow(
             logger.info(f"   ✅ Reflection complete ({time.time() - node_start:.2f}s)")
             logger.info(f"      Confidence level: {state['confidence_level'].upper()}")
 
+            logger.info(f"\n   📤 OUTPUT STATE:")
+            logger.info(f"      Reflection result stored in state['reflection_result']")
+            logger.info(f"      Validation passed: {result['validation_passed']}")
+            logger.info(f"      Confidence level: {state['confidence_level']}")
+            logger.info(f"      Total warnings: {len(state['warnings'])}")
+
         except Exception as e:
             logger.error(f"   ❌ Reflection failed ({time.time() - node_start:.2f}s): {e}")
             state["confidence_level"] = "medium"
@@ -572,9 +604,13 @@ def create_freshstart_workflow(
         logger.info("└─────────────────────────────────────────────────────────────────┘")
 
         try:
-            logger.info("   📄 Generating explanation...")
+            logger.info("   📥 INPUT STATE:")
+            logger.info(f"      Ticker: {state.get('ticker', 'N/A')}")
             logger.info(f"      User tier: {state['user_tier']}")
             logger.info(f"      Confidence level: {state['confidence_level']}")
+            logger.info(f"      Prediction: {state.get('prediction_result', {}).get('direction', 'N/A')}")
+            logger.info(f"      Sentiment: {state.get('sentiment_result', {}).get('current', 'N/A')}")
+            logger.info("   📄 Generating explanation...")
 
             explanation = explanation_agent.run(
                 ticker=state["ticker"],
@@ -588,6 +624,11 @@ def create_freshstart_workflow(
             state["explanation"] = explanation
             logger.info(f"   ✅ Explanation generated ({time.time() - node_start:.2f}s)")
             logger.info(f"      Length: {len(explanation)} characters")
+
+            logger.info(f"\n   📤 OUTPUT STATE (FINAL):")
+            logger.info(f"      Explanation stored in state['explanation']")
+            logger.info(f"      Complete analysis ready for response")
+            logger.info(f"      Fields populated: ticker, prediction, sentiment, explanation, confidence_level, warnings")
 
         except Exception as e:
             logger.error(f"   ❌ Explanation generation failed ({time.time() - node_start:.2f}s): {e}")

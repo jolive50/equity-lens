@@ -43,16 +43,36 @@ class ExplanationAgent:
         Returns:
             String with explanation
         """
+        logger.info("      ╔══════════════════════════════════════════════════════╗")
+        logger.info("      ║  📝 ExplanationAgent Execution                     ║")
+        logger.info("      ╚══════════════════════════════════════════════════════╝")
+        logger.info(f"         Ticker: {ticker}")
+        logger.info(f"         User tier: {user_tier}")
+        logger.info(f"         Confidence level: {confidence_level}")
+        logger.info(f"         → Input data:")
+        logger.info(f"            Prediction direction: {prediction.get('direction', 'N/A')}")
+        logger.info(f"            Prediction confidence: {prediction.get('confidence', 0):.1%}")
+        logger.info(f"            Sentiment: {sentiment.get('current', 'N/A')} ({sentiment.get('score', 0):.2f})")
+
         # If LLM available, use it
         if self.llm:
-            return self._generate_llm_explanation(
+            logger.info(f"         → Using LLM-based explanation generation")
+            explanation = self._generate_llm_explanation(
+                ticker, prediction, sentiment, smart_money, user_tier, confidence_level
+            )
+        else:
+            logger.info(f"         → Using template-based explanation generation")
+            explanation = self._generate_template_explanation(
                 ticker, prediction, sentiment, smart_money, user_tier, confidence_level
             )
 
-        # Otherwise, use template-based explanation
-        return self._generate_template_explanation(
-            ticker, prediction, sentiment, smart_money, user_tier, confidence_level
-        )
+        logger.info("      ┌──────────────────────────────────────────────────┐")
+        logger.info("      │  📝 Explanation Result                           │")
+        logger.info("      └──────────────────────────────────────────────────┘")
+        logger.info(f"         Generated explanation: {len(explanation)} characters")
+        logger.info(f"         Preview: {explanation[:100]}...")
+
+        return explanation
 
     def _generate_template_explanation(
         self,

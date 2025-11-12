@@ -51,30 +51,60 @@ class ReflectionAgent:
         Returns:
             Dict with validation results
         """
+        logger.info("      ╔══════════════════════════════════════════════════════╗")
+        logger.info("      ║  🔍 ReflectionAgent Execution                      ║")
+        logger.info("      ╚══════════════════════════════════════════════════════╝")
+        logger.info(f"         → Validating prediction and sentiment alignment")
+
         issues = []
         recommendations = []
         confidence_adjustment = 0.0
 
         # Check 1: Prediction validity
-        if not self._check_prediction_validity(prediction):
+        logger.info(f"         → Check 1: Prediction validity")
+        check1_pass = self._check_prediction_validity(prediction)
+        if not check1_pass:
             issues.append("Prediction confidence out of valid range")
             recommendations.append("Review prediction model calibration")
             confidence_adjustment -= 0.2
+            logger.warning(f"            ⚠️  FAILED - Confidence: {prediction.get('confidence', 0):.1%}")
+        else:
+            logger.info(f"            ✓ PASSED - Confidence: {prediction.get('confidence', 0):.1%}, Direction: {prediction.get('direction', 'N/A')}")
 
         # Check 2: Sentiment-prediction alignment
-        if not self._check_alignment(prediction, sentiment):
+        logger.info(f"         → Check 2: Sentiment-prediction alignment")
+        check2_pass = self._check_alignment(prediction, sentiment)
+        if not check2_pass:
             issues.append("Prediction and sentiment show conflicting signals")
             recommendations.append("Verify data sources and model assumptions")
             confidence_adjustment -= 0.1
+            logger.warning(f"            ⚠️  FAILED - Prediction: {prediction.get('direction', 'N/A')}, Sentiment: {sentiment.get('current', 'N/A')}")
+        else:
+            logger.info(f"            ✓ PASSED - Prediction: {prediction.get('direction', 'N/A')}, Sentiment: {sentiment.get('current', 'N/A')}")
 
         # Check 3: Data freshness
-        if not self._check_freshness(market_data):
+        logger.info(f"         → Check 3: Data freshness")
+        check3_pass = self._check_freshness(market_data)
+        if not check3_pass:
             issues.append("Market data may be stale")
             recommendations.append("Refresh data from API")
             confidence_adjustment -= 0.15
+            logger.warning(f"            ⚠️  FAILED - Data is stale")
+        else:
+            logger.info(f"            ✓ PASSED - Data is fresh")
 
         # Determine validation result
         validation_passed = len(issues) == 0
+
+        logger.info("      ┌──────────────────────────────────────────────────┐")
+        logger.info("      │  🔍 Reflection Result                            │")
+        logger.info("      └──────────────────────────────────────────────────┘")
+        logger.info(f"         Validation: {'PASSED ✓' if validation_passed else 'FAILED ✗'}")
+        logger.info(f"         Issues found: {len(issues)}")
+        if issues:
+            for i, issue in enumerate(issues, 1):
+                logger.info(f"            {i}. {issue}")
+        logger.info(f"         Confidence adjustment: {confidence_adjustment:+.2f}")
 
         return {
             "validation_passed": validation_passed,

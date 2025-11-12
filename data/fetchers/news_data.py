@@ -59,10 +59,11 @@ class NewsDataFetcher:
             RuntimeError: If API call fails
         """
         if not self.api_key:
-            logger.info(
-                "Returning offline news sample for %s (API key missing)", ticker
-            )
-            return self._offline_articles(ticker, limit)
+            logger.info(f"      📡 DATA FETCHER: Using offline news sample for {ticker}")
+            logger.info(f"         → Reason: API key not configured")
+            articles = self._offline_articles(ticker, limit)
+            logger.info(f"      ✅ DATA FETCHER: Generated {len(articles)} offline sample articles")
+            return articles
 
         params = {
             "function": "NEWS_SENTIMENT",
@@ -77,6 +78,10 @@ class NewsDataFetcher:
             params["time_to"] = time_to
 
         try:
+            logger.info(f"      📡 DATA FETCHER: Fetching news for {ticker}")
+            logger.info(f"         → API: Alpha Vantage NEWS_SENTIMENT")
+            logger.info(f"         → Limit: {params['limit']} articles")
+
             response = requests.get(self.base_url, params=params, timeout=30)
             response.raise_for_status()
             data = response.json()
@@ -92,12 +97,25 @@ class NewsDataFetcher:
 
             articles = self._parse_articles(data["feed"])
 
+            # Log article statistics
+            if articles:
+                sentiments = [a["sentiment"]["label"] for a in articles]
+                pos_count = sentiments.count("Positive")
+                neg_count = sentiments.count("Negative")
+                neu_count = sentiments.count("Neutral")
+
+                logger.info(f"      ✅ DATA FETCHER: Successfully fetched {len(articles)} news articles")
+                logger.info(f"         → Sentiment distribution: {pos_count} positive, {neu_count} neutral, {neg_count} negative")
+                logger.info(f"         → Latest article: \"{articles[0]['title'][:50]}...\"")
+                logger.info(f"         → Sources: {len(set(a['source'] for a in articles))} unique sources")
+
             # Rate limiting
             time.sleep(self.rate_limit_delay)
 
             return articles
 
         except requests.exceptions.RequestException as e:
+            logger.error(f"      ❌ DATA FETCHER: Failed to fetch news for {ticker}: {e}")
             raise RuntimeError(f"Failed to fetch news for {ticker}: {e}") from e
 
     def fetch_multiple_tickers(
