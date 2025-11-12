@@ -16,6 +16,93 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 
+def _calculate_financial_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_pred_proba: np.ndarray) -> Dict[str, float]:
+    """Calculate financial evaluation metrics for trading strategy.
+
+    Simulates a simple trading strategy:
+    - Predict "up" (class 2): Take long position
+    - Predict "down" (class 0): Take short position
+    - Predict "neutral" (class 1): No trade
+
+    Assumes actual returns based on class labels:
+    - Class 0 (down): -0.5% average move
+    - Class 1 (neutral): 0% move
+    - Class 2 (up): +0.5% average move
+
+    Args:
+        y_true: True labels (0=down, 1=neutral, 2=up)
+        y_pred: Predicted labels
+        y_pred_proba: Prediction probabilities (for confidence weighting)
+
+    Returns:
+        Dictionary with financial metrics
+    """
+    # Map classes to simulated returns (±0.5% per research threshold)
+    class_to_return = {
+        0: -0.5,  # down
+        1: 0.0,   # neutral
+        2: 0.5    # up
+    }
+
+    trades = []
+    profits = []
+    losses = []
+
+    for i in range(len(y_true)):
+        pred_class = y_pred[i]
+        true_class = y_true[i]
+
+        # Skip neutral predictions (no trade)
+        if pred_class == 1:
+            continue
+
+        # Actual return based on true class
+        actual_return = class_to_return[true_class]
+
+        # Trading return (long if pred up, short if pred down)
+        if pred_class == 2:  # Predicted up, go long
+            trade_return = actual_return
+        elif pred_class == 0:  # Predicted down, go short
+            trade_return = -actual_return  # Inverse the return (short)
+        else:
+            continue
+
+        trades.append(trade_return)
+
+        if trade_return > 0:
+            profits.append(trade_return)
+        elif trade_return < 0:
+            losses.append(abs(trade_return))
+
+    # Calculate metrics
+    if len(trades) == 0:
+        return {
+            'expected_value_per_trade': 0.0,
+            'avg_profit': 0.0,
+            'avg_loss': 0.0,
+            'payoff_asymmetry': 0.0,
+            'win_rate': 0.0,
+            'total_trades': 0
+        }
+
+    expected_value = np.mean(trades)
+    avg_profit = np.mean(profits) if profits else 0.0
+    avg_loss = np.mean(losses) if losses else 0.0
+    payoff_asymmetry = avg_profit / avg_loss if avg_loss > 0 else 0.0
+    win_rate = (len(profits) / len(trades)) * 100 if trades else 0.0
+
+    return {
+        'expected_value_per_trade': float(expected_value),
+        'avg_profit': float(avg_profit),
+        'avg_loss': float(avg_loss),
+        'payoff_asymmetry': float(payoff_asymmetry),
+        'win_rate': float(win_rate),
+        'total_trades': len(trades),
+        'winning_trades': len(profits),
+        'losing_trades': len(losses)
+    }
+
+
 def load_training_data(data_dir: str = "data/processed") -> Dict[str, np.ndarray]:
     """Load preprocessed training data.
 
@@ -189,15 +276,39 @@ def train_lstm_model(
 
         # Get predictions for additional metrics
         y_pred = np.argmax(model.predict(X_val, verbose=0), axis=1)
-        from sklearn.metrics import classification_report
+        y_pred_proba = model.predict(X_val, verbose=0)
+
+        from sklearn.metrics import classification_report, confusion_matrix
 
         logger.info(f"\n✓ Training complete:")
         logger.info(f"  Training time: {training_time/3600:.2f} hours")
         logger.info(f"  Epochs completed: {len(history.history['loss'])}")
         logger.info(f"  Train accuracy: {train_acc:.4f}")
         logger.info(f"  Val accuracy:   {val_acc:.4f}")
+
         logger.info(f"\nClassification Report:")
+        class_report = classification_report(y_val, y_pred, target_names=['down', 'neutral', 'up'], output_dict=True)
         logger.info(classification_report(y_val, y_pred, target_names=['down', 'neutral', 'up']))
+
+        # Confusion Matrix
+        cm = confusion_matrix(y_val, y_pred)
+        logger.info(f"\nConfusion Matrix:")
+        logger.info(f"                Predicted")
+        logger.info(f"              Down  Neutral  Up")
+        logger.info(f"Actual Down     {cm[0][0]:4d}    {cm[0][1]:4d}  {cm[0][2]:4d}")
+        logger.info(f"       Neutral  {cm[1][0]:4d}    {cm[1][1]:4d}  {cm[1][2]:4d}")
+        logger.info(f"       Up       {cm[2][0]:4d}    {cm[2][1]:4d}  {cm[2][2]:4d}")
+
+        # Financial Metrics (simulate trading returns)
+        financial_metrics = _calculate_financial_metrics(y_val, y_pred, y_pred_proba)
+
+        logger.info(f"\nFinancial Evaluation Metrics:")
+        logger.info(f"  Expected Value per Trade: {financial_metrics['expected_value_per_trade']:.4f}%")
+        logger.info(f"  Average Profit (winners):  {financial_metrics['avg_profit']:.4f}%")
+        logger.info(f"  Average Loss (losers):     {financial_metrics['avg_loss']:.4f}%")
+        logger.info(f"  Payoff Asymmetry (P/L):    {financial_metrics['payoff_asymmetry']:.4f}")
+        logger.info(f"  Win Rate:                  {financial_metrics['win_rate']:.2f}%")
+        logger.info(f"  Total Trades:              {financial_metrics['total_trades']}")
 
         # Save final model
         model_file = save_path / "lstm_model.keras"
@@ -210,7 +321,10 @@ def train_lstm_model(
             'train_loss': float(train_loss),
             'val_loss': float(val_loss),
             'training_time_hours': float(training_time / 3600),
-            'epochs': len(history.history['loss'])
+            'epochs': len(history.history['loss']),
+            'classification_report': class_report,
+            'confusion_matrix': cm.tolist(),
+            'financial_metrics': financial_metrics
         }
 
     except ImportError:
@@ -352,15 +466,39 @@ def train_gru_model(
 
         # Get predictions for additional metrics
         y_pred = np.argmax(model.predict(X_val, verbose=0), axis=1)
-        from sklearn.metrics import classification_report
+        y_pred_proba = model.predict(X_val, verbose=0)
+
+        from sklearn.metrics import classification_report, confusion_matrix
 
         logger.info(f"\n✓ Training complete:")
         logger.info(f"  Training time: {training_time/3600:.2f} hours")
         logger.info(f"  Epochs completed: {len(history.history['loss'])}")
         logger.info(f"  Train accuracy: {train_acc:.4f}")
         logger.info(f"  Val accuracy:   {val_acc:.4f}")
+
         logger.info(f"\nClassification Report:")
+        class_report = classification_report(y_val, y_pred, target_names=['down', 'neutral', 'up'], output_dict=True)
         logger.info(classification_report(y_val, y_pred, target_names=['down', 'neutral', 'up']))
+
+        # Confusion Matrix
+        cm = confusion_matrix(y_val, y_pred)
+        logger.info(f"\nConfusion Matrix:")
+        logger.info(f"                Predicted")
+        logger.info(f"              Down  Neutral  Up")
+        logger.info(f"Actual Down     {cm[0][0]:4d}    {cm[0][1]:4d}  {cm[0][2]:4d}")
+        logger.info(f"       Neutral  {cm[1][0]:4d}    {cm[1][1]:4d}  {cm[1][2]:4d}")
+        logger.info(f"       Up       {cm[2][0]:4d}    {cm[2][1]:4d}  {cm[2][2]:4d}")
+
+        # Financial Metrics
+        financial_metrics = _calculate_financial_metrics(y_val, y_pred, y_pred_proba)
+
+        logger.info(f"\nFinancial Evaluation Metrics:")
+        logger.info(f"  Expected Value per Trade: {financial_metrics['expected_value_per_trade']:.4f}%")
+        logger.info(f"  Average Profit (winners):  {financial_metrics['avg_profit']:.4f}%")
+        logger.info(f"  Average Loss (losers):     {financial_metrics['avg_loss']:.4f}%")
+        logger.info(f"  Payoff Asymmetry (P/L):    {financial_metrics['payoff_asymmetry']:.4f}")
+        logger.info(f"  Win Rate:                  {financial_metrics['win_rate']:.2f}%")
+        logger.info(f"  Total Trades:              {financial_metrics['total_trades']}")
 
         # Save model
         model_file = save_path / "gru_model.keras"
@@ -373,7 +511,10 @@ def train_gru_model(
             'train_loss': float(train_loss),
             'val_loss': float(val_loss),
             'training_time_hours': float(training_time / 3600),
-            'epochs': len(history.history['loss'])
+            'epochs': len(history.history['loss']),
+            'classification_report': class_report,
+            'confusion_matrix': cm.tolist(),
+            'financial_metrics': financial_metrics
         }
 
     except ImportError:
@@ -504,6 +645,7 @@ def train_gradient_boost_model(
         training_time = time.time() - start_time
         train_pred = model.predict(X_train)
         val_pred = model.predict(X_val)
+        val_pred_proba = model.predict_proba(X_val)
 
         train_acc = accuracy_score(y_train, train_pred)
         val_acc = accuracy_score(y_val, val_pred)
@@ -512,8 +654,30 @@ def train_gradient_boost_model(
         logger.info(f"  Training time: {training_time/3600:.2f} hours")
         logger.info(f"  Train accuracy: {train_acc:.4f}")
         logger.info(f"  Val accuracy:   {val_acc:.4f}")
+
         logger.info(f"\nClassification Report:")
+        class_report = classification_report(y_val, val_pred, target_names=['down', 'neutral', 'up'], output_dict=True)
         logger.info(classification_report(y_val, val_pred, target_names=['down', 'neutral', 'up']))
+
+        # Confusion Matrix
+        cm = confusion_matrix(y_val, val_pred)
+        logger.info(f"\nConfusion Matrix:")
+        logger.info(f"                Predicted")
+        logger.info(f"              Down  Neutral  Up")
+        logger.info(f"Actual Down     {cm[0][0]:4d}    {cm[0][1]:4d}  {cm[0][2]:4d}")
+        logger.info(f"       Neutral  {cm[1][0]:4d}    {cm[1][1]:4d}  {cm[1][2]:4d}")
+        logger.info(f"       Up       {cm[2][0]:4d}    {cm[2][1]:4d}  {cm[2][2]:4d}")
+
+        # Financial Metrics
+        financial_metrics = _calculate_financial_metrics(y_val, val_pred, val_pred_proba)
+
+        logger.info(f"\nFinancial Evaluation Metrics:")
+        logger.info(f"  Expected Value per Trade: {financial_metrics['expected_value_per_trade']:.4f}%")
+        logger.info(f"  Average Profit (winners):  {financial_metrics['avg_profit']:.4f}%")
+        logger.info(f"  Average Loss (losers):     {financial_metrics['avg_loss']:.4f}%")
+        logger.info(f"  Payoff Asymmetry (P/L):    {financial_metrics['payoff_asymmetry']:.4f}")
+        logger.info(f"  Win Rate:                  {financial_metrics['win_rate']:.2f}%")
+        logger.info(f"  Total Trades:              {financial_metrics['total_trades']}")
 
         # Feature importance (top 15)
         if hasattr(model, 'feature_importances_'):
@@ -542,7 +706,10 @@ def train_gradient_boost_model(
             'train_accuracy': float(train_acc),
             'val_accuracy': float(val_acc),
             'training_time_hours': float(training_time / 3600),
-            'used_gridsearch': use_gridsearch
+            'used_gridsearch': use_gridsearch,
+            'classification_report': class_report,
+            'confusion_matrix': cm.tolist(),
+            'financial_metrics': financial_metrics
         }
 
         if use_gridsearch:
@@ -558,7 +725,7 @@ def train_gradient_boost_model(
 
 
 def save_training_report(metrics: Dict[str, Dict[str, Any]], output_file: str = "models/prediction/training_report.txt"):
-    """Save training report with all model metrics.
+    """Save comprehensive training report with all model metrics.
 
     Args:
         metrics: Dictionary with metrics for each model
@@ -567,15 +734,130 @@ def save_training_report(metrics: Dict[str, Dict[str, Any]], output_file: str = 
     report_path = Path(output_file)
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
-    report = ["=" * 60, "FreshStart - Model Training Report", "=" * 60, ""]
+    report = [
+        "=" * 80,
+        "FreshStart - Model Training Report (Research-Enhanced)",
+        "=" * 80,
+        ""
+    ]
 
     for model_name, model_metrics in metrics.items():
-        report.append(f"\n{model_name} Model:")
-        report.append("-" * 40)
-        for metric_name, value in model_metrics.items():
-            report.append(f"  {metric_name}: {value:.4f}" if isinstance(value, float) else f"  {metric_name}: {value}")
+        report.append(f"\n{'=' * 80}")
+        report.append(f"{model_name} Model")
+        report.append("=" * 80)
 
-    report.append("\n" + "=" * 60)
+        # Basic metrics
+        report.append("\nBasic Performance Metrics:")
+        report.append("-" * 40)
+        if 'train_accuracy' in model_metrics:
+            report.append(f"  Train Accuracy:      {model_metrics['train_accuracy']:.4f}")
+        if 'val_accuracy' in model_metrics:
+            report.append(f"  Validation Accuracy: {model_metrics['val_accuracy']:.4f}")
+        if 'train_loss' in model_metrics:
+            report.append(f"  Train Loss:          {model_metrics['train_loss']:.4f}")
+        if 'val_loss' in model_metrics:
+            report.append(f"  Validation Loss:     {model_metrics['val_loss']:.4f}")
+        if 'training_time_hours' in model_metrics:
+            report.append(f"  Training Time:       {model_metrics['training_time_hours']:.2f} hours")
+        if 'epochs' in model_metrics:
+            report.append(f"  Epochs Completed:    {model_metrics['epochs']}")
+
+        # GridSearch info for XGBoost
+        if 'used_gridsearch' in model_metrics and model_metrics['used_gridsearch']:
+            report.append("\nGridSearch Results:")
+            report.append("-" * 40)
+            if 'best_cv_score' in model_metrics:
+                report.append(f"  Best CV Score:       {model_metrics['best_cv_score']:.4f}")
+            if 'best_params' in model_metrics:
+                report.append("  Best Parameters:")
+                for param, value in model_metrics['best_params'].items():
+                    report.append(f"    {param}: {value}")
+
+        # Classification Report
+        if 'classification_report' in model_metrics:
+            report.append("\nPer-Class Performance:")
+            report.append("-" * 40)
+            class_report = model_metrics['classification_report']
+
+            for class_name in ['down', 'neutral', 'up']:
+                if class_name in class_report:
+                    metrics_dict = class_report[class_name]
+                    report.append(f"  {class_name.upper()}:")
+                    report.append(f"    Precision: {metrics_dict['precision']:.4f}")
+                    report.append(f"    Recall:    {metrics_dict['recall']:.4f}")
+                    report.append(f"    F1-Score:  {metrics_dict['f1-score']:.4f}")
+                    report.append(f"    Support:   {int(metrics_dict['support'])}")
+
+            # Weighted averages
+            if 'weighted avg' in class_report:
+                weighted = class_report['weighted avg']
+                report.append(f"\n  WEIGHTED AVERAGE:")
+                report.append(f"    Precision: {weighted['precision']:.4f}")
+                report.append(f"    Recall:    {weighted['recall']:.4f}")
+                report.append(f"    F1-Score:  {weighted['f1-score']:.4f}")
+
+        # Confusion Matrix
+        if 'confusion_matrix' in model_metrics:
+            report.append("\nConfusion Matrix:")
+            report.append("-" * 40)
+            cm = model_metrics['confusion_matrix']
+            report.append("                    Predicted")
+            report.append("              Down    Neutral    Up")
+            report.append(f"Actual Down    {cm[0][0]:4d}      {cm[0][1]:4d}    {cm[0][2]:4d}")
+            report.append(f"       Neutral {cm[1][0]:4d}      {cm[1][1]:4d}    {cm[1][2]:4d}")
+            report.append(f"       Up      {cm[2][0]:4d}      {cm[2][1]:4d}    {cm[2][2]:4d}")
+
+        # Financial Metrics
+        if 'financial_metrics' in model_metrics:
+            report.append("\nFinancial Evaluation (Simulated Trading):")
+            report.append("-" * 40)
+            fin = model_metrics['financial_metrics']
+            report.append(f"  Expected Value/Trade:  {fin['expected_value_per_trade']:+.4f}%")
+            report.append(f"  Average Profit:        {fin['avg_profit']:.4f}%")
+            report.append(f"  Average Loss:          {fin['avg_loss']:.4f}%")
+            report.append(f"  Payoff Asymmetry:      {fin['payoff_asymmetry']:.4f}x")
+            report.append(f"  Win Rate:              {fin['win_rate']:.2f}%")
+            report.append(f"  Total Trades:          {fin['total_trades']}")
+            if 'winning_trades' in fin and 'losing_trades' in fin:
+                report.append(f"  Winning Trades:        {fin['winning_trades']}")
+                report.append(f"  Losing Trades:         {fin['losing_trades']}")
+
+            # Interpretation
+            report.append("\n  Interpretation:")
+            if fin['expected_value_per_trade'] > 0:
+                report.append(f"    ✓ POSITIVE expectancy: Strategy is profitable on average")
+            else:
+                report.append(f"    ✗ NEGATIVE expectancy: Strategy loses money on average")
+
+            if fin['payoff_asymmetry'] > 1.0:
+                report.append(f"    ✓ Winners larger than losers (good risk/reward)")
+            else:
+                report.append(f"    ✗ Losers larger than winners (poor risk/reward)")
+
+    # Summary comparison
+    report.append(f"\n\n{'=' * 80}")
+    report.append("Model Comparison Summary")
+    report.append("=" * 80)
+    report.append("\nValidation Accuracy:")
+    for model_name, model_metrics in metrics.items():
+        if 'val_accuracy' in model_metrics:
+            report.append(f"  {model_name:15s}: {model_metrics['val_accuracy']:.4f}")
+
+    report.append("\nExpected Value per Trade:")
+    for model_name, model_metrics in metrics.items():
+        if 'financial_metrics' in model_metrics:
+            ev = model_metrics['financial_metrics']['expected_value_per_trade']
+            report.append(f"  {model_name:15s}: {ev:+.4f}%")
+
+    report.append("\nPayoff Asymmetry (Profit/Loss Ratio):")
+    for model_name, model_metrics in metrics.items():
+        if 'financial_metrics' in model_metrics:
+            pa = model_metrics['financial_metrics']['payoff_asymmetry']
+            report.append(f"  {model_name:15s}: {pa:.4f}x")
+
+    report.append("\n" + "=" * 80)
+    report.append("End of Report")
+    report.append("=" * 80)
 
     report_text = "\n".join(report)
 
@@ -583,7 +865,6 @@ def save_training_report(metrics: Dict[str, Dict[str, Any]], output_file: str = 
         f.write(report_text)
 
     logger.info(f"\n✓ Training report saved to: {report_path}")
-    logger.info(report_text)
 
 
 def main():
