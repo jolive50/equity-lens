@@ -641,12 +641,23 @@ def run_stock_analysis(
 
     # Load config
     if config is None:
-        config = WorkflowConfig()
+        # Try to load from config.yaml first, fall back to defaults
+        import os
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+        if os.path.exists(config_path):
+            config = WorkflowConfig.from_yaml(config_path)
+            logger.info(f"📄 Loaded configuration from {config_path}")
+        else:
+            config = WorkflowConfig()
+            logger.info(f"📄 Using default configuration (config.yaml not found)")
 
     logger.info(f"\n📋 WORKFLOW: Configuration loaded")
     logger.info(f"   Prediction models: {config.prediction_models}")
-    logger.info(f"   Use ensemble: {config.use_ensemble}")
-    logger.info(f"   Ensemble strategy: {config.prediction_ensemble_strategy}")
+    logger.info(f"   Use prediction ensemble: {config.use_ensemble}")
+    logger.info(f"   Prediction strategy: {config.prediction_ensemble_strategy}")
+    logger.info(f"   Sentiment models: {config.sentiment_models}")
+    logger.info(f"   Use sentiment ensemble: {config.use_sentiment_ensemble}")
+    logger.info(f"   Sentiment strategy: {config.sentiment_ensemble_strategy}")
     logger.info(f"   Reflection enabled: {config.reflection_enabled}")
 
     # Create agents
@@ -661,11 +672,16 @@ def run_stock_analysis(
 
     logger.info("   2️⃣  Creating SentimentAgent...")
     agent_start = time.time()
-    sentiment_agent = SentimentAgent()
+    sentiment_model = config.get_sentiment_model()
+    sentiment_agent = SentimentAgent(sentiment_model=sentiment_model)
     logger.info(f"      ✓ SentimentAgent ready ({time.time() - agent_start:.2f}s)")
     if sentiment_agent.sentiment_model:
         model_info = sentiment_agent.sentiment_model.get_model_info()
-        logger.info(f"      Model: {model_info['name']} (v{model_info['version']})")
+        if model_info.get('type') == 'ensemble':
+            logger.info(f"      Model: {model_info['name']} (strategy: {model_info['strategy']})")
+            logger.info(f"      Ensemble contains: {', '.join(model_info['models'])}")
+        else:
+            logger.info(f"      Model: {model_info['name']} (v{model_info.get('version', 'unknown')})")
 
     logger.info("   3️⃣  Creating ReflectionAgent...")
     agent_start = time.time()

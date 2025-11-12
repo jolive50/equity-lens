@@ -1,0 +1,55 @@
+# FreshStart Workflow Configuration
+# Enable all models in ensemble mode for maximum accuracy
+
+# ============================================================
+# PREDICTION MODELS (Pam's Models)
+# ============================================================
+prediction_models:
+  - LSTM
+  - GRU
+  - GradientBoost
+
+# Enable ensemble mode (combines all prediction models)
+use_ensemble: true
+
+# Ensemble strategy: weighted_average, simple_average, voting
+prediction_ensemble_strategy: weighted_average
+
+# Model weights for weighted_average strategy
+# Adjust based on individual model performance
+prediction_model_weights:
+  LSTM: 0.4              # Strong temporal pattern recognition
+  GRU: 0.35              # Good at recent trends
+  GradientBoost: 0.25    # Captures non-linear relationships
+
+# ============================================================
+# SENTIMENT MODELS (Tae's Models)
+# ============================================================
+sentiment_models:
+  - FinBERT
+  - RoBERTa
+  - VADER
+  - TextBlob
+
+# Enable sentiment ensemble mode
+use_sentiment_ensemble: true
+
+# Sentiment ensemble strategy: weighted_average, simple_average, voting
+sentiment_ensemble_strategy: weighted_average
+
+# Sentiment model weights
+sentiment_model_weights:
+  FinBERT: 0.4    # Best for financial text
+  RoBERTa: 0.3    # Strong general sentiment
+  VADER: 0.2      # Good for social media/informal text
+  TextBlob: 0.1   # Simple baseline
+
+# ============================================================
+# WORKFLOW SETTINGS
+# ============================================================
+
+# Enable reflection agent for quality validation
+reflection_enabled: true
+
+# Confidence threshold for high-confidence recommendations
+confidence_threshold: 0.75

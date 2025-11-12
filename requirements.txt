@@ -29,6 +29,7 @@ chromadb==1.0.20
 
 # Utilities
 python-dotenv==1.2.1
+pyyaml==6.0.2
 
 # Testing
 pytest==9.0.0
