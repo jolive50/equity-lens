@@ -595,7 +595,7 @@ def create_freshstart_workflow(
         return state
 
     def build_explanation(state: StockAnalysisState) -> StockAnalysisState:
-        """Generate explanation."""
+        """Generate explanation with ChromaDB and SQLite context."""
         import time
         node_start = time.time()
 
@@ -610,7 +610,44 @@ def create_freshstart_workflow(
             logger.info(f"      Confidence level: {state['confidence_level']}")
             logger.info(f"      Prediction: {state.get('prediction_result', {}).get('direction', 'N/A')}")
             logger.info(f"      Sentiment: {state.get('sentiment_result', {}).get('current', 'N/A')}")
-            logger.info("   📄 Generating explanation...")
+
+            ticker = state["ticker"]
+
+            # Fetch ChromaDB data (similar news and statistics)
+            logger.info("   🔍 Fetching ChromaDB context...")
+            similar_news = []
+            news_statistics = None
+            vector_store = _get_vector_store()
+            if vector_store:
+                try:
+                    # Search for similar news based on current sentiment
+                    sentiment_current = state["sentiment_result"].get("current", "neutral")
+                    search_query = f"{ticker} stock {sentiment_current} news"
+                    similar_news = vector_store.search_similar_news(
+                        query=search_query,
+                        ticker=ticker,
+                        n_results=5
+                    )
+                    logger.info(f"      ✓ Found {len(similar_news)} similar news articles")
+
+                    # Get news statistics for ticker
+                    news_statistics = vector_store.get_ticker_statistics(ticker)
+                    logger.info(f"      ✓ Retrieved news statistics: {news_statistics.get('total_articles', 0)} total articles")
+                except Exception as e:
+                    logger.warning(f"      ⚠️  ChromaDB query failed: {e}")
+
+            # Fetch SQLite data (historical analyses)
+            logger.info("   💾 Fetching SQLite historical analyses...")
+            historical_analyses = []
+            db = _get_db_client()
+            if db:
+                try:
+                    historical_analyses = db.get_analysis_history(ticker.upper(), limit=5)
+                    logger.info(f"      ✓ Found {len(historical_analyses)} historical analyses")
+                except Exception as e:
+                    logger.warning(f"      ⚠️  SQLite query failed: {e}")
+
+            logger.info("   📄 Generating explanation with historical context...")
 
             explanation = explanation_agent.run(
                 ticker=state["ticker"],
@@ -618,12 +655,16 @@ def create_freshstart_workflow(
                 sentiment=state["sentiment_result"],
                 smart_money={},  # Placeholder
                 user_tier=state["user_tier"],
-                confidence_level=state["confidence_level"]
+                confidence_level=state["confidence_level"],
+                similar_news=similar_news,
+                historical_analyses=historical_analyses,
+                news_statistics=news_statistics
             )
 
             state["explanation"] = explanation
             logger.info(f"   ✅ Explanation generated ({time.time() - node_start:.2f}s)")
             logger.info(f"      Length: {len(explanation)} characters")
+            logger.info(f"      Context used: {len(similar_news)} similar news, {len(historical_analyses)} historical analyses")
 
             logger.info(f"\n   📤 OUTPUT STATE (FINAL):")
             logger.info(f"      Explanation stored in state['explanation']")
