@@ -296,23 +296,30 @@ Defines dependencies and scripts.
 - `npm start` - Run production build
 
 #### `next.config.js`
-Proxies API requests to FastAPI backend.
+**ACTUAL PRODUCTION CONFIG:**
 
 ```javascript
-async rewrites() {
-  return [
-    {
-      source: '/api/:path*',           // Frontend calls /api/analyze
-      destination: 'http://localhost:8000/:path*',  // Proxies to FastAPI
-    },
-  ]
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
 }
+
+module.exports = nextConfig
 ```
 
-**Why This Works:**
-- Frontend calls `/api/analyze` (same origin - no CORS issue)
-- Next.js forwards to `http://localhost:8000/analyze`
-- User sees single application
+**No Proxy Configuration:**
+- Frontend directly calls backend at `http://localhost:8000/analyze`
+- CORS is handled on **backend side** in `api/main.py`:
+  ```python
+  app.add_middleware(
+      CORSMiddleware,
+      allow_origins=["http://localhost:3000"],  # Frontend URL
+      allow_credentials=True,
+      allow_methods=["*"],
+      allow_headers=["*"],
+  )
+  ```
+- This approach is simpler and more explicit than Next.js rewrites
 
 #### `tsconfig.json`
 TypeScript configuration.
@@ -648,11 +655,29 @@ result = run_stock_analysis(
 }
 ```
 
-**Field Mapping:**
-Your API transforms workflow output to match frontend expectations:
-- `sentiment.current` → `sentiment.label` (frontend expects "label")
-- `sentiment.headlines` → `sentiment.top_headlines` (frontend expects "top_headlines")
-- `warnings` → `reflection.issues` (frontend expects nested structure)
+**Field Mapping (ACTUAL IMPLEMENTATION):**
+Your API transforms workflow output in `_transform_workflow_result()` (api/main.py:188-235):
+
+```python
+# Line 210: Map sentiment field names
+sentiment = SentimentResult(
+    label=sentiment_data.get("current", "neutral"),         # current → label
+    score=sentiment_data.get("score", 0.0),
+    trend=sentiment_data.get("trend", "stable"),
+    top_headlines=sentiment_data.get("headlines", [])       # headlines → top_headlines
+)
+
+# Line 219-222: Map warnings to reflection
+reflection = ReflectionResult(
+    validation_passed=reflection_data.get("reflection_passed", True),
+    issues=warnings  # warnings → reflection.issues
+)
+```
+
+**Why These Transformations:**
+- Workflow uses `"current"`, frontend expects `"label"` (standardized naming)
+- Workflow uses `"headlines"`, frontend expects `"top_headlines"` (clearer meaning)
+- Workflow has flat `warnings`, frontend expects nested `reflection.issues` (better structure)
 
 ### 4.2 Frontend → Backend Integration
 

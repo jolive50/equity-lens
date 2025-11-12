@@ -211,12 +211,17 @@ Return List[Dict]:
 - **API Errors**: Raises RuntimeError with descriptive error message
 - **Missing Data**: Returns empty list, logs warning
 
-**Offline Mode (no API key):**
-- Automatically generates deterministic sample articles for testing
+**Offline Mode (no API key) - FALLBACK ONLY:**
+- **Purpose**: Fallback for development/testing, NOT for production
+- Automatically generates deterministic sample articles when API key missing
 - Uses `_offline_articles()` method with predefined news templates
 - Sentiment scores generated based on ticker and date hash
 - Logs clear message: "Using offline news sample for {ticker}"
-- **Use Case**: Local development without API key, testing, CI/CD pipelines
+- **Use Cases**:
+  - Local development without API key
+  - Automated testing in CI/CD pipelines
+  - Quick prototyping and demos
+- **⚠️ Production Recommendation**: Always use real API with ALPHA_VANTAGE_API_KEY for accurate results
 
 **Implementation Detail:**
 ```python
