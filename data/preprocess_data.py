@@ -123,7 +123,13 @@ class DataPreprocessor:
         return []
 
     def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Engineer features for ML models.
+        """Engineer features for ML models (Research-Enhanced).
+
+        Based on research showing these features significantly improve accuracy:
+        - Lagged returns at multiple scales (1d, 5d, 10d, 20d, 60d, 252d)
+        - Technical indicators (RSI, MACD, Bollinger Bands)
+        - Extended moving averages (5, 10, 20, 50, 200-day)
+        - Volatility measures
 
         Args:
             df: DataFrame with OHLCV data
@@ -133,52 +139,96 @@ class DataPreprocessor:
         """
         df = df.copy()
 
-        # Price returns
+        # Extended lagged returns (research recommendation)
         df['returns_1d'] = df['close'].pct_change(1)
         df['returns_5d'] = df['close'].pct_change(5)
         df['returns_10d'] = df['close'].pct_change(10)
+        df['returns_20d'] = df['close'].pct_change(20)
+        df['returns_60d'] = df['close'].pct_change(60)
 
-        # Moving averages
+        # Long-term momentum (annual)
+        if len(df) >= 252:
+            df['returns_252d'] = df['close'].pct_change(252)
+        else:
+            df['returns_252d'] = 0.0
+
+        # Extended moving averages (research shows 50 and 200-day are critical)
         df['sma_5'] = df['close'].rolling(5).mean()
         df['sma_10'] = df['close'].rolling(10).mean()
         df['sma_20'] = df['close'].rolling(20).mean()
+        df['sma_50'] = df['close'].rolling(50).mean()
+        df['sma_200'] = df['close'].rolling(200).mean()
 
-        # Volatility
+        # Moving average crossovers (strong signals)
+        df['sma_5_20_cross'] = (df['sma_5'] / df['sma_20']) - 1
+        df['sma_50_200_cross'] = (df['sma_50'] / df['sma_200']) - 1
+
+        # RSI (Relative Strength Index) - 14-day standard
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-10)
+        df['rsi_14'] = 100 - (100 / (1 + rs))
+
+        # MACD (Moving Average Convergence Divergence)
+        ema_12 = df['close'].ewm(span=12, adjust=False).mean()
+        ema_26 = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = ema_12 - ema_26
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_diff'] = df['macd'] - df['macd_signal']
+
+        # Bollinger Bands (20-day, 2 std dev)
+        bb_ma = df['close'].rolling(20).mean()
+        bb_std = df['close'].rolling(20).std()
+        df['bb_upper'] = bb_ma + (2 * bb_std)
+        df['bb_lower'] = bb_ma - (2 * bb_std)
+        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / bb_ma
+        df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'] + 1e-10)
+
+        # Enhanced volatility measures
         df['volatility_10d'] = df['returns_1d'].rolling(10).std()
+        df['volatility_20d'] = df['returns_1d'].rolling(20).std()
+        df['volatility_60d'] = df['returns_1d'].rolling(60).std()
 
         # Volume features
         df['volume_ma_10'] = df['volume'].rolling(10).mean()
-        df['volume_ratio'] = df['volume'] / df['volume_ma_10']
+        df['volume_ma_20'] = df['volume'].rolling(20).mean()
+        df['volume_ratio'] = df['volume'] / (df['volume_ma_10'] + 1e-10)
+        df['volume_trend'] = df['volume_ma_10'] / (df['volume_ma_20'] + 1e-10)
 
-        # Price momentum
+        # Price momentum indicators
         df['momentum_10d'] = df['close'] / df['close'].shift(10) - 1
+        df['momentum_20d'] = df['close'] / df['close'].shift(20) - 1
 
-        # High-Low spread
+        # High-Low spread (volatility proxy)
         df['hl_spread'] = (df['high'] - df['low']) / df['close']
+        df['hl_spread_ma'] = df['hl_spread'].rolling(10).mean()
 
         # Target: Next day direction
         df['target_direction'] = (df['close'].shift(-1) > df['close']).astype(int)
-        # 0 = down/neutral, 1 = up
 
-        # Multi-class target
+        # Multi-class target (±0.5% threshold per research)
         next_return = df['close'].pct_change(1).shift(-1)
         df['target_multiclass'] = 1  # neutral
-        df.loc[next_return > 0.01, 'target_multiclass'] = 2  # up
-        df.loc[next_return < -0.01, 'target_multiclass'] = 0  # down
+        df.loc[next_return > 0.005, 'target_multiclass'] = 2  # up (>0.5%)
+        df.loc[next_return < -0.005, 'target_multiclass'] = 0  # down (<-0.5%)
 
         return df
 
     def create_sequences(
         self,
         df: pd.DataFrame,
-        sequence_length: int = 30,
+        sequence_length: int = 60,
         features: List[str] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Create sequences for LSTM/GRU training.
+        """Create sequences for LSTM/GRU training (Research-Enhanced).
+
+        Research shows 60-day lookback window is optimal for capturing
+        both short-term patterns and longer-term trends.
 
         Args:
             df: DataFrame with features
-            sequence_length: Number of time steps
+            sequence_length: Number of time steps (default 60 per research)
             features: List of feature column names
 
         Returns:
@@ -186,10 +236,23 @@ class DataPreprocessor:
         """
         if features is None:
             features = [
-                'returns_1d', 'returns_5d', 'returns_10d',
-                'sma_5', 'sma_10', 'sma_20',
-                'volatility_10d', 'volume_ratio', 'momentum_10d',
-                'hl_spread'
+                # Lagged returns (research-recommended)
+                'returns_1d', 'returns_5d', 'returns_10d', 'returns_20d', 'returns_60d',
+                # Technical indicators (critical per research)
+                'rsi_14', 'macd', 'macd_diff',
+                # Bollinger Bands
+                'bb_width', 'bb_position',
+                # Moving averages
+                'sma_5', 'sma_10', 'sma_20', 'sma_50',
+                'sma_5_20_cross', 'sma_50_200_cross',
+                # Volatility
+                'volatility_10d', 'volatility_20d', 'volatility_60d',
+                # Volume
+                'volume_ratio', 'volume_trend',
+                # Momentum
+                'momentum_10d', 'momentum_20d',
+                # Spread
+                'hl_spread', 'hl_spread_ma'
             ]
 
         # Remove NaN rows
@@ -216,7 +279,10 @@ class DataPreprocessor:
         df: pd.DataFrame,
         features: List[str] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Create tabular features for Gradient Boost.
+        """Create tabular features for Gradient Boost (Research-Enhanced).
+
+        Research shows XGBoost performs best with comprehensive feature set
+        including all technical indicators.
 
         Args:
             df: DataFrame with features
@@ -227,10 +293,23 @@ class DataPreprocessor:
         """
         if features is None:
             features = [
-                'returns_1d', 'returns_5d', 'returns_10d',
-                'sma_5', 'sma_10', 'sma_20',
-                'volatility_10d', 'volume_ratio', 'momentum_10d',
-                'hl_spread'
+                # Lagged returns (research-critical)
+                'returns_1d', 'returns_5d', 'returns_10d', 'returns_20d', 'returns_60d', 'returns_252d',
+                # Technical indicators
+                'rsi_14', 'macd', 'macd_signal', 'macd_diff',
+                # Bollinger Bands
+                'bb_width', 'bb_position',
+                # Moving averages
+                'sma_5', 'sma_10', 'sma_20', 'sma_50', 'sma_200',
+                'sma_5_20_cross', 'sma_50_200_cross',
+                # Volatility
+                'volatility_10d', 'volatility_20d', 'volatility_60d',
+                # Volume
+                'volume_ratio', 'volume_trend',
+                # Momentum
+                'momentum_10d', 'momentum_20d',
+                # Spread
+                'hl_spread', 'hl_spread_ma'
             ]
 
         df_clean = df.dropna(subset=features + ['target_multiclass'])
@@ -243,18 +322,20 @@ class DataPreprocessor:
     def process_all_stocks(
         self,
         max_stocks: int = 50,
-        sequence_length: int = 30
+        sequence_length: int = 60
     ) -> Dict[str, Any]:
-        """Process multiple stocks and combine data.
+        """Process multiple stocks and combine data (Research-Enhanced).
+
+        Research recommends 60-day sequences for optimal temporal pattern capture.
 
         Args:
             max_stocks: Maximum number of stocks to process
-            sequence_length: Sequence length for LSTM/GRU
+            sequence_length: Sequence length for LSTM/GRU (default 60 per research)
 
         Returns:
             Dictionary with processed data
         """
-        logger.info(f"Processing up to {max_stocks} stocks...")
+        logger.info(f"Processing up to {max_stocks} stocks with {sequence_length}-day sequences...")
 
         tickers = self._get_available_tickers()
 
