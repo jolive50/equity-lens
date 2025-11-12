@@ -3,7 +3,8 @@
 
 **Team Member**: PAM
 **Responsibility**: Prediction Models, Price Data, Training Pipeline
-**Last Updated**: 2025-11-12
+**Last Updated**: 2025-01-12
+**Code Analysis Date**: 2025-01-12 (Reflects actual repository state)
 
 ---
 
@@ -22,13 +23,15 @@
 | Ensemble System | ✅ Complete | Configurable | 3 strategies available |
 | Training Pipeline | ✅ Complete | Ready to execute | `train_models.py` |
 
-**Current Usage in Production:**
-- **PredictionAgent** uses LSTM model (with fallback predictions)
-- **Price caching** reduces API calls by 95% (1 day TTL)
-- **Fallback predictions** use 10-day momentum (simple but functional)
-- **Training pipeline** ready - run `python -m models.prediction.train_models`
+**Current Production Configuration (config.yaml):**
+- **Ensemble Mode Enabled:** All 3 models (LSTM, GRU, GradientBoost)
+- **Strategy:** Weighted average (LSTM: 40%, GRU: 35%, GradientBoost: 25%)
+- **PredictionAgent Default:** LSTM with momentum fallback if untrained
+- **Price Caching:** 1-day TTL in SQLite (min 30 rows required)
+- **Fundamentals:** P/E ratio, market cap, revenue growth, profit margin, debt/equity, ROE, beta
+- **Data Source:** yfinance (Yahoo Finance) - no API key required
 
-**⚠️ ACTION NEEDED:** Train models to improve accuracy from fallback (50-60%) to ML predictions (60-70%)
+**⚠️ ACTION NEEDED:** Train models to improve accuracy from fallback (~50-60%) to ML predictions (~60-70%)
 
 ---
 
@@ -631,20 +634,27 @@ Result used by ReflectionAgent & ExplanationAgent
 Final response to user
 ```
 
-**Configuration:**
-JOSH's `coordinator/config.py` lets users choose which model to use:
+**Configuration (config.yaml):**
 
-```python
-# Single model (current default)
-config.prediction_models = ["LSTM"]
-config.use_ensemble = False
+Current production settings enable ensemble mode with all 3 models:
 
-# Ensemble (available after training)
-config.prediction_models = ["LSTM", "GRU", "GradientBoost"]
-config.use_ensemble = True
-config.ensemble_strategy = "weighted_average"
-config.model_weights = {"LSTM": 0.6, "GRU": 0.4}
+```yaml
+# Prediction Models Configuration
+prediction_models:
+  - LSTM
+  - GRU
+  - GradientBoost
+
+use_ensemble: true
+prediction_ensemble_strategy: weighted_average
+
+prediction_model_weights:
+  LSTM: 0.4              # Strong temporal pattern recognition
+  GRU: 0.35              # Good at recent trends
+  GradientBoost: 0.25    # Captures non-linear relationships
 ```
+
+JOSH's `coordinator/config.py` loads these settings and instantiates models dynamically.
 
 ---
 

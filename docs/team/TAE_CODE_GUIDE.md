@@ -1,6 +1,7 @@
 # TAE'S CODE GUIDE - Sentiment Models & News System
 
-**Last Updated:** 2025-11-12
+**Last Updated:** 2025-01-12
+**Code Analysis Date:** 2025-01-12 (Reflects actual repository state)
 
 ---
 
@@ -20,11 +21,13 @@
 | ChromaDB Vector Store | ✅ Complete | News embedding storage | ~100ms add |
 | Fine-Tuning Pipeline | ✅ Complete | Ready for custom data | N/A |
 
-**Current Usage in Production:**
-- **SentimentAgent** uses FinBERT as primary model (50% faster than expected)
-- **Automatic fallback** to VADER if FinBERT unavailable
-- **News caching** reduces API calls by 90%
-- **Vector store** enables semantic search across 1000+ articles
+**Current Production Configuration (config.yaml):**
+- **Ensemble Mode Enabled:** All 4 models (FinBERT, RoBERTa, VADER, TextBlob)
+- **Strategy:** Weighted average (FinBERT: 40%, RoBERTa: 30%, VADER: 20%, TextBlob: 10%)
+- **SentimentAgent Fallback:** FinBERT → VADER if FinBERT unavailable
+- **News Caching:** 60-minute TTL in SQLite reduces API calls by 90%
+- **Vector Store:** ChromaDB in `./db/chroma` for semantic news search
+- **Offline Mode:** NewsDataFetcher generates deterministic sample articles when API key missing
 
 ---
 
@@ -201,11 +204,26 @@ Return List[Dict]:
     }, ...]
 ```
 
-### Error Handling
+### Error Handling & Offline Mode
 
-- **Rate Limit**: 12 second delay between calls
-- **API Errors**: Raises RuntimeError with error message
+**API Available (with ALPHA_VANTAGE_API_KEY):**
+- **Rate Limit**: Automatic 12-second delay between calls (5 calls/min free tier)
+- **API Errors**: Raises RuntimeError with descriptive error message
 - **Missing Data**: Returns empty list, logs warning
+
+**Offline Mode (no API key):**
+- Automatically generates deterministic sample articles for testing
+- Uses `_offline_articles()` method with predefined news templates
+- Sentiment scores generated based on ticker and date hash
+- Logs clear message: "Using offline news sample for {ticker}"
+- **Use Case**: Local development without API key, testing, CI/CD pipelines
+
+**Implementation Detail:**
+```python
+if not self.api_key:
+    logger.info(f"Using offline news sample for {ticker}")
+    return self._offline_articles(ticker, limit)
+```
 
 ### Usage Example
 
