@@ -49,14 +49,26 @@ class LSTMModel(BasePredictionModel):
         Returns:
             PredictionResult with direction and confidence
         """
+        import time
+        predict_start = time.time()
+
+        logger.debug(f"            → LSTM predicting (data shape: {data.shape})")
+
         if not self.is_trained or self.model is None:
+            logger.debug(f"            ⚠️  LSTM not trained, using momentum fallback")
             # Fallback to momentum-based prediction
             return self._momentum_prediction(data)
 
         try:
             # Extract features and make prediction
+            feature_start = time.time()
             features = self._prepare_features(data)
+            feature_time = time.time() - feature_start
+            logger.debug(f"            ✓ Features prepared: shape={features.shape} ({feature_time*1000:.1f}ms)")
+
+            inference_start = time.time()
             probabilities = self.model.predict(features, verbose=0)
+            inference_time = time.time() - inference_start
 
             prob_down, prob_neutral, prob_up = probabilities[0]
 
@@ -71,6 +83,12 @@ class LSTMModel(BasePredictionModel):
                 direction = "neutral"
                 confidence = float(prob_neutral)
 
+            total_time = time.time() - predict_start
+            logger.debug(
+                f"            ✓ LSTM result: {direction} ({confidence:.2f}) "
+                f"[features: {feature_time*1000:.1f}ms, inference: {inference_time*1000:.1f}ms, total: {total_time*1000:.1f}ms]"
+            )
+
             return PredictionResult(
                 direction=direction,
                 confidence=confidence,
@@ -79,11 +97,17 @@ class LSTMModel(BasePredictionModel):
                     "down": float(prob_down),
                     "neutral": float(prob_neutral)
                 },
-                metadata={"model": "LSTM", "trained": self.is_trained}
+                metadata={
+                    "model": "LSTM",
+                    "trained": self.is_trained,
+                    "feature_time_ms": feature_time * 1000,
+                    "inference_time_ms": inference_time * 1000,
+                    "input_shape": str(features.shape)
+                }
             )
 
         except Exception as e:
-            logger.error(f"LSTM prediction failed: {e}")
+            logger.error(f"            ✗ LSTM prediction failed: {e}")
             return self._momentum_prediction(data)
 
     def _prepare_features(self, data: pd.DataFrame) -> np.ndarray:

@@ -61,8 +61,20 @@ class SentimentAgent:
         Returns:
             SentimentAgentResult with sentiment analysis
         """
+        import time
+        agent_start = time.time()
+
+        logger.info("      ╔══════════════════════════════════════════════════════╗")
+        logger.info("      ║  💬 SentimentAgent Execution                       ║")
+        logger.info("      ╚══════════════════════════════════════════════════════╝")
+        logger.info(f"         Ticker: {ticker}")
+        if self.sentiment_model:
+            model_info = self.sentiment_model.get_model_info()
+            logger.info(f"         Model: {model_info['name']} v{model_info['version']}")
+        logger.info(f"         News articles: {len(news_data)}")
+
         if not news_data:
-            logger.warning(f"No news data for {ticker}, returning neutral sentiment")
+            logger.warning(f"         ⚠️  No news data for {ticker}, returning neutral sentiment")
             return SentimentAgentResult(
                 current="neutral",
                 score=0.5,
@@ -71,7 +83,7 @@ class SentimentAgent:
             )
 
         if self.sentiment_model is None:
-            logger.error("No sentiment model available, returning neutral")
+            logger.error("         ❌ No sentiment model available, returning neutral")
             return SentimentAgentResult(
                 current="neutral",
                 score=0.5,
@@ -80,10 +92,11 @@ class SentimentAgent:
             )
 
         # Use REAL sentiment analysis with Tae's models
+        logger.info(f"         → Analyzing top 10 articles...")
         sentiment_results = []
         headlines = []
 
-        for article in news_data[:10]:  # Analyze top 10 articles
+        for idx, article in enumerate(news_data[:10], 1):  # Analyze top 10 articles
             title = article.get("title", "")
             content = article.get("content", "") or article.get("summary", "")
 
@@ -114,14 +127,14 @@ class SentimentAgent:
                     "probabilities": result.probabilities
                 })
 
-                logger.debug(f"Article sentiment: {result.label} ({result.confidence:.2f}) - {title[:50]}")
+                logger.debug(f"         Article {idx}: {result.label} ({result.confidence:.2f}) - {title[:40]}...")
 
             except Exception as e:
-                logger.warning(f"Failed to analyze article '{title[:50]}': {e}")
+                logger.warning(f"         ⚠️  Failed to analyze article {idx}: {e}")
                 continue
 
         if not sentiment_results:
-            logger.warning(f"No articles successfully analyzed for {ticker}")
+            logger.warning(f"         ⚠️  No articles successfully analyzed for {ticker}")
             return SentimentAgentResult(
                 current="neutral",
                 score=0.5,
@@ -155,7 +168,23 @@ class SentimentAgent:
         else:
             trend = "stable"
 
-        logger.info(f"Sentiment analysis complete: {current} (score={avg_score:.2f}, trend={trend})")
+        total_time = time.time() - agent_start
+
+        logger.info("      ┌──────────────────────────────────────────────────┐")
+        logger.info("      │  💬 Sentiment Result                             │")
+        logger.info("      └──────────────────────────────────────────────────┘")
+        logger.info(f"         Articles analyzed: {len(sentiment_results)}/{len(news_data[:10])}")
+        logger.info(f"         Sentiment: {current.upper()}")
+        logger.info(f"         Score: {avg_score:.2f} (0=negative, 0.5=neutral, 1=positive)")
+        logger.info(f"         Trend: {trend}")
+        logger.info(f"         Sentiment distribution:")
+        pos_count = sum(1 for r in sentiment_results if r["label"] == "positive")
+        neg_count = sum(1 for r in sentiment_results if r["label"] == "negative")
+        neu_count = sum(1 for r in sentiment_results if r["label"] == "neutral")
+        logger.info(f"            Positive: {pos_count}/{len(sentiment_results)}")
+        logger.info(f"            Negative: {neg_count}/{len(sentiment_results)}")
+        logger.info(f"            Neutral:  {neu_count}/{len(sentiment_results)}")
+        logger.info(f"         Total time: {total_time:.3f}s")
 
         return SentimentAgentResult(
             current=current,

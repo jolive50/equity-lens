@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Dict, Any, Optional, List
 
@@ -7,6 +8,8 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from .base_sentiment import BaseSentimentModel, SentimentResult
+
+logger = logging.getLogger(__name__)
 
 
 class _FinBERTDataset(Dataset):
@@ -69,10 +72,16 @@ class FinBERTModel(BaseSentimentModel):
 
     def analyze(self, text: str) -> SentimentResult:
         """Analyze sentiment of a single text snippet."""
+        import time
+
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
 
         try:
+            logger.debug(f"            → FinBERT analyzing: '{text[:50]}...'")
+            analyze_start = time.time()
+
+            tokenize_start = time.time()
             inputs = self.tokenizer(
                 text,
                 return_tensors="pt",
@@ -81,16 +90,25 @@ class FinBERTModel(BaseSentimentModel):
                 max_length=512,
             )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            tokenize_time = time.time() - tokenize_start
 
+            inference_start = time.time()
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 probabilities = torch.nn.functional.softmax(
                     outputs.logits, dim=-1
                 ).cpu().numpy()[0]
+            inference_time = time.time() - inference_start
 
             label_idx = int(np.argmax(probabilities))
             label = self.LABEL_MAP[label_idx]
             confidence = float(probabilities[label_idx])
+
+            total_time = time.time() - analyze_start
+            logger.debug(
+                f"            ✓ FinBERT result: {label} ({confidence:.2f}) "
+                f"[tokenize: {tokenize_time*1000:.1f}ms, inference: {inference_time*1000:.1f}ms, total: {total_time*1000:.1f}ms]"
+            )
 
             return SentimentResult(
                 label=label,
@@ -104,10 +122,14 @@ class FinBERTModel(BaseSentimentModel):
                     "model": "FinBERT",
                     "model_name": self.model_name,
                     "fine_tuned": self.weights_path is not None,
+                    "device": str(self.device),
+                    "tokenize_time_ms": tokenize_time * 1000,
+                    "inference_time_ms": inference_time * 1000,
                 },
             )
 
         except Exception as e:
+            logger.error(f"            ✗ FinBERT analysis failed: {e}")
             raise RuntimeError(f"FinBERT analysis failed: {e}") from e
 
     def analyze_batch(self, texts: List[str]) -> List[SentimentResult]:

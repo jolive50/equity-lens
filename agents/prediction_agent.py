@@ -67,15 +67,19 @@ class PredictionAgent:
         Returns:
             PredictionAgentResult with direction, confidence, narrative
         """
+        import time
+        agent_start = time.time()
+
         if self.model is None:
             raise RuntimeError("No prediction model loaded")
 
-        logger.info(
-            "PredictionAgent running for %s (%d market rows, %d fundamentals)",
-            ticker,
-            len(market_data),
-            len(fundamentals),
-        )
+        logger.info("      ╔══════════════════════════════════════════════════════╗")
+        logger.info("      ║  🔮 PredictionAgent Execution                      ║")
+        logger.info("      ╚══════════════════════════════════════════════════════╝")
+        logger.info(f"         Ticker: {ticker}")
+        logger.info(f"         Model: {self.model.__class__.__name__}")
+        logger.info(f"         Market data rows: {len(market_data)}")
+        logger.info(f"         Fundamentals: {len(fundamentals)} metrics")
 
         # Convert market_data to DataFrame
         df = pd.DataFrame(market_data)
@@ -87,7 +91,11 @@ class PredictionAgent:
 
         # Make prediction
         try:
+            logger.info(f"         → Calling model.predict()...")
+            predict_start = time.time()
             result = self.model.predict(df)
+            predict_time = time.time() - predict_start
+            logger.info(f"         ✓ Model inference: {predict_time:.3f}s")
 
             # Generate narrative
             narrative = self._generate_narrative(ticker, result, fundamentals)
@@ -100,17 +108,24 @@ class PredictionAgent:
                 metadata=result.metadata
             )
 
-            logger.info(
-                "PredictionAgent result for %s: %s @ %.1f%% confidence",
-                ticker,
-                prediction.direction,
-                prediction.confidence * 100,
-            )
+            total_time = time.time() - agent_start
+
+            logger.info("      ┌──────────────────────────────────────────────────┐")
+            logger.info("      │  📊 Prediction Result                            │")
+            logger.info("      └──────────────────────────────────────────────────┘")
+            logger.info(f"         Direction: {prediction.direction.upper()}")
+            logger.info(f"         Confidence: {prediction.confidence:.1%}")
+            logger.info(f"         Probabilities:")
+            logger.info(f"            ↑ UP:      {result.probabilities['up']:.1%}")
+            logger.info(f"            ↓ DOWN:    {result.probabilities['down']:.1%}")
+            logger.info(f"            → NEUTRAL: {result.probabilities.get('neutral', 0):.1%}")
+            logger.info(f"         Metadata: {result.metadata}")
+            logger.info(f"         Total time: {total_time:.3f}s")
 
             return prediction
 
         except Exception as e:
-            logger.error(f"Prediction failed for {ticker}: {e}")
+            logger.error(f"         ❌ Prediction failed for {ticker}: {e}")
             raise RuntimeError(f"Prediction failed: {e}")
 
     def _generate_narrative(

@@ -290,25 +290,40 @@ def create_freshstart_workflow(
 
     def validate_input(state: StockAnalysisState) -> StockAnalysisState:
         """Validate input and set defaults."""
+        logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
+        logger.info("│ 📝 NODE: validate_input                                        │")
+        logger.info("└─────────────────────────────────────────────────────────────────┘")
+
         if not state.get("ticker"):
+            logger.error("❌ Validation failed: Ticker is required")
             raise ValueError("Ticker is required")
 
         if not state.get("user_tier"):
             state["user_tier"] = "basic"
+            logger.info("   ℹ️  User tier not specified, defaulting to 'basic'")
 
         if not state.get("warnings"):
             state["warnings"] = []
 
-        logger.info(f"Starting analysis for {state['ticker']}")
+        logger.info(f"   ✅ Input validated: ticker={state['ticker']}, user_tier={state['user_tier']}")
         return state
 
     def fetch_data(state: StockAnalysisState) -> StockAnalysisState:
         """Fetch market and news data with SQLite caching."""
+        import time
+        node_start = time.time()
+
+        logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
+        logger.info("│ 📊 NODE: fetch_data                                            │")
+        logger.info("└─────────────────────────────────────────────────────────────────┘")
+
         ticker = state["ticker"]
 
         from data.fetchers.price_data import get_fundamentals, get_historical_data
 
         # Fetch price data (prefer cached when fresh)
+        logger.info("   📈 Fetching price data...")
+        price_start = time.time()
         market_data: List[Dict[str, Any]] = []
         cached_recent_prices = _load_cached_market_data(
             ticker,
@@ -318,41 +333,49 @@ def create_freshstart_workflow(
         if cached_recent_prices:
             market_data = cached_recent_prices
             logger.info(
-                "Using cached price data for %s (%d rows <= %d day old)",
-                ticker,
+                "      ✓ Using cached price data: %d rows (≤%d day old) [%s]",
                 len(cached_recent_prices),
                 PRICE_CACHE_TTL_DAYS,
+                "CACHE HIT"
             )
         else:
             try:
                 market_data = get_historical_data(ticker, period="3mo")
-                logger.info(f"Fetched {len(market_data)} days of data for {ticker}")
+                logger.info(f"      ✓ Fetched fresh price data: {len(market_data)} rows [API CALL]")
                 _cache_market_data(ticker, market_data)
             except Exception as e:
-                logger.error(f"Failed to fetch price data: {e}")
+                logger.error(f"      ✗ Failed to fetch price data: {e}")
                 cached_data = _load_cached_market_data(ticker)
                 if cached_data:
                     warning = f"Price data API error ({str(e)}); using cached history"
-                    logger.warning(warning)
+                    logger.warning(f"      ⚠️  {warning}")
                     state["warnings"].append(warning)
                     market_data = cached_data
                 else:
                     state["warnings"].append(f"Data fetch error: {str(e)}")
+        logger.info(f"      ⏱️  Price data fetch: {time.time() - price_start:.2f}s")
 
         state["market_data"] = market_data
 
         # Fetch fundamental data independently so we still load it when price fetch fails
+        logger.info("   💼 Fetching fundamentals...")
+        fundamentals_start = time.time()
         fundamentals: Dict[str, float] = {}
         try:
             fundamentals = get_fundamentals(ticker)
-            logger.info(f"Fetched {len(fundamentals)} fundamental metrics for {ticker}")
+            logger.info(f"      ✓ Fetched {len(fundamentals)} fundamental metrics")
+            if fundamentals:
+                logger.info(f"         Metrics: {', '.join(list(fundamentals.keys())[:5])}...")
         except Exception as e:
-            logger.error(f"Failed to fetch fundamentals: {e}")
+            logger.error(f"      ✗ Failed to fetch fundamentals: {e}")
             state["warnings"].append(f"Fundamentals fetch error: {str(e)}")
+        logger.info(f"      ⏱️  Fundamentals fetch: {time.time() - fundamentals_start:.2f}s")
 
         state["fundamentals"] = fundamentals
 
         # Fetch news data using Tae's NewsDataFetcher (reuse cache when fresh)
+        logger.info("   📰 Fetching news articles...")
+        news_start = time.time()
         news_limit = 50
         cached_recent_news = _load_cached_news(
             ticker,
@@ -362,8 +385,7 @@ def create_freshstart_workflow(
         if cached_recent_news:
             state["news_data"] = cached_recent_news
             logger.info(
-                "Using cached news for %s (%d articles <= %d min old)",
-                ticker,
+                "      ✓ Using cached news: %d articles (≤%d min old) [CACHE HIT]",
                 len(cached_recent_news),
                 NEWS_CACHE_TTL_MINUTES,
             )
@@ -375,27 +397,42 @@ def create_freshstart_workflow(
                 news_articles = news_fetcher.fetch_news(ticker, limit=news_limit)
                 state["news_data"] = news_articles
 
-                logger.info(f"Fetched {len(news_articles)} news articles for {ticker}")
+                logger.info(f"      ✓ Fetched fresh news: {len(news_articles)} articles [API CALL]")
                 _cache_news_articles(ticker, news_articles)
                 _persist_news_embeddings(ticker, news_articles)
 
             except Exception as e:
-                logger.error(f"Failed to fetch news: {e}")
+                logger.error(f"      ✗ Failed to fetch news: {e}")
                 cached_news = _load_cached_news(ticker, limit=news_limit)
                 if cached_news:
                     warning = f"News API error ({str(e)}); using cached articles"
-                    logger.warning(warning)
+                    logger.warning(f"      ⚠️  {warning}")
                     state["warnings"].append(warning)
                     state["news_data"] = cached_news
                 else:
                     state["warnings"].append(f"News fetch error: {str(e)}")
                     state["news_data"] = []
+        logger.info(f"      ⏱️  News fetch: {time.time() - news_start:.2f}s")
+
+        logger.info(f"   ✅ Data fetch complete ({time.time() - node_start:.2f}s total)")
+        logger.info(f"      Summary: {len(market_data)} price rows, {len(fundamentals)} metrics, {len(state.get('news_data', []))} articles")
 
         return state
 
     def run_prediction(state: StockAnalysisState) -> StockAnalysisState:
         """Run prediction agent."""
+        import time
+        node_start = time.time()
+
+        logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
+        logger.info("│ 🔮 NODE: run_prediction (PredictionAgent)                     │")
+        logger.info("└─────────────────────────────────────────────────────────────────┘")
+
         try:
+            logger.info("   📊 Input data:")
+            logger.info(f"      Market data: {len(state['market_data'])} rows")
+            logger.info(f"      Fundamentals: {len(state['fundamentals'])} metrics")
+
             result = prediction_agent.run(
                 ticker=state["ticker"],
                 market_data=state["market_data"],
@@ -410,10 +447,14 @@ def create_freshstart_workflow(
                 "metadata": result.metadata
             }
 
-            logger.info(f"Prediction: {result.direction} ({result.confidence:.1%})")
+            logger.info(f"   ✅ Prediction complete ({time.time() - node_start:.2f}s)")
+            logger.info(f"      Model: {result.metadata.get('model', 'Unknown')}")
+            logger.info(f"      Direction: {result.direction.upper()}")
+            logger.info(f"      Confidence: {result.confidence:.1%}")
+            logger.info(f"      Probabilities: ↑{result.probabilities['up']:.1%} ↓{result.probabilities['down']:.1%} →{result.probabilities.get('neutral', 0):.1%}")
 
         except Exception as e:
-            logger.error(f"Prediction failed: {e}")
+            logger.error(f"   ❌ Prediction failed ({time.time() - node_start:.2f}s): {e}")
             state["warnings"].append(f"Prediction error: {str(e)}")
             state["prediction_result"] = {
                 "direction": "neutral",
@@ -427,7 +468,17 @@ def create_freshstart_workflow(
 
     def run_sentiment(state: StockAnalysisState) -> StockAnalysisState:
         """Run sentiment agent."""
+        import time
+        node_start = time.time()
+
+        logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
+        logger.info("│ 💬 NODE: run_sentiment (SentimentAgent)                       │")
+        logger.info("└─────────────────────────────────────────────────────────────────┘")
+
         try:
+            logger.info("   📰 Input data:")
+            logger.info(f"      News articles: {len(state['news_data'])}")
+
             result = sentiment_agent.run(
                 ticker=state["ticker"],
                 news_data=state["news_data"]
@@ -440,10 +491,17 @@ def create_freshstart_workflow(
                 "headlines": result.headlines
             }
 
-            logger.info(f"Sentiment: {result.current} ({result.score:.1%})")
+            logger.info(f"   ✅ Sentiment analysis complete ({time.time() - node_start:.2f}s)")
+            if sentiment_agent.sentiment_model:
+                model_info = sentiment_agent.sentiment_model.get_model_info()
+                logger.info(f"      Model: {model_info['name']}")
+            logger.info(f"      Sentiment: {result.current.upper()}")
+            logger.info(f"      Score: {result.score:.2f} (0=negative, 0.5=neutral, 1=positive)")
+            logger.info(f"      Trend: {result.trend}")
+            logger.info(f"      Headlines analyzed: {len(result.headlines)}")
 
         except Exception as e:
-            logger.error(f"Sentiment analysis failed: {e}")
+            logger.error(f"   ❌ Sentiment analysis failed ({time.time() - node_start:.2f}s): {e}")
             state["warnings"].append(f"Sentiment error: {str(e)}")
             state["sentiment_result"] = {
                 "current": "neutral",
@@ -456,7 +514,16 @@ def create_freshstart_workflow(
 
     def run_reflection(state: StockAnalysisState) -> StockAnalysisState:
         """Run reflection agent for quality validation."""
+        import time
+        node_start = time.time()
+
+        logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
+        logger.info("│ 🔍 NODE: run_reflection (ReflectionAgent)                     │")
+        logger.info("└─────────────────────────────────────────────────────────────────┘")
+
         try:
+            logger.info("   🔎 Validating analysis quality...")
+
             result = reflection_agent.run(
                 prediction=state["prediction_result"],
                 sentiment=state["sentiment_result"],
@@ -471,7 +538,9 @@ def create_freshstart_workflow(
             if not result["validation_passed"]:
                 state["warnings"].extend(result["issues"])
                 state["confidence_level"] = "low"
-                logger.warning(f"Validation failed: {len(result['issues'])} issues")
+                logger.warning(f"   ⚠️  Validation failed: {len(result['issues'])} issues")
+                for idx, issue in enumerate(result['issues'], 1):
+                    logger.warning(f"      {idx}. {issue}")
             else:
                 # Set confidence level based on prediction confidence
                 pred_conf = state["prediction_result"]["confidence"]
@@ -481,9 +550,13 @@ def create_freshstart_workflow(
                     state["confidence_level"] = "medium"
                 else:
                     state["confidence_level"] = "low"
+                logger.info(f"   ✅ Validation passed")
+
+            logger.info(f"   ✅ Reflection complete ({time.time() - node_start:.2f}s)")
+            logger.info(f"      Confidence level: {state['confidence_level'].upper()}")
 
         except Exception as e:
-            logger.error(f"Reflection failed: {e}")
+            logger.error(f"   ❌ Reflection failed ({time.time() - node_start:.2f}s): {e}")
             state["confidence_level"] = "medium"
             state["reflection_result"] = {"validation_passed": True, "issues": []}
 
@@ -491,7 +564,18 @@ def create_freshstart_workflow(
 
     def build_explanation(state: StockAnalysisState) -> StockAnalysisState:
         """Generate explanation."""
+        import time
+        node_start = time.time()
+
+        logger.info("\n┌─────────────────────────────────────────────────────────────────┐")
+        logger.info("│ 📝 NODE: build_explanation (ExplanationAgent)                 │")
+        logger.info("└─────────────────────────────────────────────────────────────────┘")
+
         try:
+            logger.info("   📄 Generating explanation...")
+            logger.info(f"      User tier: {state['user_tier']}")
+            logger.info(f"      Confidence level: {state['confidence_level']}")
+
             explanation = explanation_agent.run(
                 ticker=state["ticker"],
                 prediction=state["prediction_result"],
@@ -502,10 +586,11 @@ def create_freshstart_workflow(
             )
 
             state["explanation"] = explanation
-            logger.info("Generated explanation")
+            logger.info(f"   ✅ Explanation generated ({time.time() - node_start:.2f}s)")
+            logger.info(f"      Length: {len(explanation)} characters")
 
         except Exception as e:
-            logger.error(f"Explanation generation failed: {e}")
+            logger.error(f"   ❌ Explanation generation failed ({time.time() - node_start:.2f}s): {e}")
             state["explanation"] = f"Analysis for {state['ticker']} completed with errors."
 
         return state
@@ -545,32 +630,81 @@ def run_stock_analysis(
     Returns:
         Dict with analysis results
     """
+    import time
+    workflow_start = time.time()
+
+    logger.info("\n" + "╔" + "═" * 78 + "╗")
+    logger.info("║" + " " * 20 + "🔷 WORKFLOW: Initializing" + " " * 28 + "║")
+    logger.info("╚" + "═" * 78 + "╝")
+
     from coordinator.config import WorkflowConfig
 
     # Load config
     if config is None:
         config = WorkflowConfig()
 
+    logger.info(f"\n📋 WORKFLOW: Configuration loaded")
+    logger.info(f"   Prediction models: {config.prediction_models}")
+    logger.info(f"   Use ensemble: {config.use_ensemble}")
+    logger.info(f"   Ensemble strategy: {config.prediction_ensemble_strategy}")
+    logger.info(f"   Reflection enabled: {config.reflection_enabled}")
+
     # Create agents
+    logger.info(f"\n🤖 WORKFLOW: Creating agents...")
+
+    logger.info("   1️⃣  Creating PredictionAgent...")
+    agent_start = time.time()
     prediction_model = config.get_prediction_model()
     prediction_agent = PredictionAgent(model=prediction_model)
+    logger.info(f"      ✓ PredictionAgent ready ({time.time() - agent_start:.2f}s)")
+    logger.info(f"      Model: {prediction_model.__class__.__name__}")
+
+    logger.info("   2️⃣  Creating SentimentAgent...")
+    agent_start = time.time()
     sentiment_agent = SentimentAgent()
+    logger.info(f"      ✓ SentimentAgent ready ({time.time() - agent_start:.2f}s)")
+    if sentiment_agent.sentiment_model:
+        model_info = sentiment_agent.sentiment_model.get_model_info()
+        logger.info(f"      Model: {model_info['name']} (v{model_info['version']})")
+
+    logger.info("   3️⃣  Creating ReflectionAgent...")
+    agent_start = time.time()
     reflection_agent = ReflectionAgent()
+    logger.info(f"      ✓ ReflectionAgent ready ({time.time() - agent_start:.2f}s)")
+
+    logger.info("   4️⃣  Creating ExplanationAgent...")
+    agent_start = time.time()
     explanation_agent = ExplanationAgent()
+    logger.info(f"      ✓ ExplanationAgent ready ({time.time() - agent_start:.2f}s)")
 
     # Create and compile workflow
+    logger.info(f"\n🔧 WORKFLOW: Building LangGraph workflow...")
+    compile_start = time.time()
     workflow = create_freshstart_workflow(
         prediction_agent=prediction_agent,
         sentiment_agent=sentiment_agent,
         reflection_agent=reflection_agent,
         explanation_agent=explanation_agent
     ).compile()
+    logger.info(f"   ✓ Workflow compiled ({time.time() - compile_start:.2f}s)")
 
     # Run workflow
+    logger.info("\n" + "╔" + "═" * 78 + "╗")
+    logger.info("║" + " " * 15 + f"🚀 WORKFLOW: Executing for {ticker}" + " " * (48 - len(ticker)) + "║")
+    logger.info("╚" + "═" * 78 + "╝")
+
+    invoke_start = time.time()
     result = workflow.invoke({
         "ticker": ticker,
         "user_tier": user_tier
     })
+    invoke_time = time.time() - invoke_start
+
+    logger.info("\n" + "╔" + "═" * 78 + "╗")
+    logger.info("║" + " " * 18 + "✅ WORKFLOW: Execution Complete" + " " * 25 + "║")
+    logger.info("╚" + "═" * 78 + "╝")
+    logger.info(f"⏱️  Workflow execution: {invoke_time:.2f}s")
+    logger.info(f"⏱️  Total workflow time: {time.time() - workflow_start:.2f}s")
 
     # Save analysis to database
     db = _get_db_client()

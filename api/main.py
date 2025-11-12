@@ -93,30 +93,68 @@ async def analyze_stock(request: AnalysisRequest) -> AnalysisResponse:
     Raises:
         HTTPException: If analysis fails or invalid input
     """
+    import time
+    start_time = time.time()
+
     ticker = request.ticker
     user_tier = request.user_tier
 
-    logger.info(f"Received analysis request: ticker={ticker}, tier={user_tier}")
+    logger.info("=" * 80)
+    logger.info("🔵 API: Analysis Request Received")
+    logger.info("=" * 80)
+    logger.info(f"📊 Ticker: {ticker}")
+    logger.info(f"👤 User Tier: {user_tier}")
+    logger.info(f"⏰ Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
         # Import workflow (lazy import to avoid startup delays)
+        logger.info("\n📦 API: Loading workflow module...")
         from coordinator.workflow import run_stock_analysis
 
         # Run the analysis workflow
+        logger.info(f"🚀 API: Initiating workflow execution for {ticker}")
+        logger.info("─" * 80)
+
+        workflow_start = time.time()
         result = run_stock_analysis(
             ticker=ticker,
             user_tier=user_tier
         )
+        workflow_time = time.time() - workflow_start
+
+        logger.info("─" * 80)
+        logger.info(f"✅ API: Workflow completed in {workflow_time:.2f}s")
 
         # Transform workflow result to API response format
+        logger.info("\n🔄 API: Transforming workflow result to API response format...")
         response = _transform_workflow_result(result)
 
-        logger.info(f"Analysis completed for {ticker}: {response.prediction.direction}")
+        total_time = time.time() - start_time
+
+        logger.info("\n" + "=" * 80)
+        logger.info("✅ API: Analysis Completed Successfully")
+        logger.info("=" * 80)
+        logger.info(f"📊 Ticker: {ticker}")
+        logger.info(f"📈 Prediction: {response.prediction.direction} ({response.prediction.confidence:.1%} confidence)")
+        logger.info(f"💬 Sentiment: {response.sentiment.label} (score: {response.sentiment.score:.2f})")
+        logger.info(f"🎯 Confidence Level: {response.confidence_level}")
+        logger.info(f"⚠️  Warnings: {len(response.warnings)}")
+        logger.info(f"⏱️  Total API Time: {total_time:.2f}s")
+        logger.info(f"   - Workflow: {workflow_time:.2f}s")
+        logger.info(f"   - Overhead: {(total_time - workflow_time):.2f}s")
+        logger.info("=" * 80 + "\n")
+
         return response
 
     except ValueError as e:
         # Validation errors from workflow
-        logger.error(f"Validation error for {ticker}: {e}")
+        error_time = time.time() - start_time
+        logger.error("\n" + "=" * 80)
+        logger.error(f"❌ API: Validation Error for {ticker}")
+        logger.error("=" * 80)
+        logger.error(f"Error: {e}")
+        logger.error(f"Time: {error_time:.2f}s")
+        logger.error("=" * 80 + "\n")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -128,7 +166,15 @@ async def analyze_stock(request: AnalysisRequest) -> AnalysisResponse:
 
     except Exception as e:
         # Unexpected errors
-        logger.error(f"Analysis failed for {ticker}: {e}", exc_info=True)
+        error_time = time.time() - start_time
+        logger.error("\n" + "=" * 80)
+        logger.error(f"❌ API: Analysis Failed for {ticker}")
+        logger.error("=" * 80)
+        logger.error(f"Error Type: {type(e).__name__}")
+        logger.error(f"Error Message: {e}")
+        logger.error(f"Time: {error_time:.2f}s")
+        logger.error("=" * 80, exc_info=True)
+        logger.error("\n")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
