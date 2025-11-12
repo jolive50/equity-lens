@@ -16,6 +16,17 @@
 .
 ├── README.md                           # [SHARED] - Quick start guide
 ├── requirements.txt                    # [SHARED] - Dependencies (including ChromaDB, LangChain)
+├── config.yaml                         # [JOSH] - Workflow configuration (model selection, weights, strategies)
+├── launch.py                           # [SHARED] - Application launcher script
+├── kaggle.json                         # [PAM] - Kaggle API credentials
+│
+├── logs/                               # [SHARED] - Application logging directory
+│   └── freshstart.log                  # [SHARED] - Main application log file
+│
+├── utils/                              # [SHARED] - Shared utility modules
+│   ├── __init__.py                     # [SHARED]
+│   ├── logging_config.py               # [SHARED] - Centralized logging configuration
+│   └── cache_metrics.py                # [SHARED] - Cache performance tracking utilities
 │
 ├── data/
 │   ├── raw/                            # [PAM] - Kaggle SP500 dataset for LSTM training
@@ -35,10 +46,11 @@
 │   │   ├── gradient_boost_model.py     # [PAM] - Gradient boosting model (~150 lines)
 │   │   ├── ensemble.py                 # [PAM] - Ensemble 2+ models or use individually (~150 lines)
 │   │   ├── train_models.py             # [PAM] - Training script for all models (~300 lines)
+│   │   ├── training_report.txt         # [PAM] - Training metrics and model performance report
 │   │   └── saved_models/               # [PAM] - Trained weights for all models
-│   │       ├── lstm/                   # [PAM] - LSTM weights
-│   │       ├── gru/                    # [PAM] - GRU weights
-│   │       └── gradient_boost/         # [PAM] - GB weights
+│   │       ├── lstm/                   # [PAM] - LSTM weights and configuration
+│   │       ├── gru/                    # [PAM] - GRU weights and configuration
+│   │       └── gradient_boost/         # [PAM] - GB weights and configuration
 │   │
 │   └── sentiment/                      # [TAE]
 │       ├── __init__.py                 # [TAE]
@@ -48,6 +60,7 @@
 │       ├── alpha_vantage_sentiment.py  # [TAE] - Alpha Vantage sentiment API (~80 lines)
 │       ├── vader_model.py              # [TAE] - NLTK VADER wrapper (~40 lines)
 │       ├── textblob_model.py           # [TAE] - TextBlob wrapper (~30 lines)
+│       ├── train_sentiment.py          # [TAE] - Sentiment model training script (~200 lines)
 │       └── ensemble.py                 # [TAE] - Ensemble 2+ models or use individually (~150 lines)
 │
 ├── agents/                             # [JOSH]
@@ -59,13 +72,13 @@
 │
 ├── coordinator/                        # [JOSH]
 │   ├── __init__.py                     # [JOSH]
-│   ├── workflow.py                     # [JOSH] - Simplified LangGraph workflow (~150 lines)
-│   └── config.py                       # [JOSH] - Model configuration system (~100 lines)
+│   ├── workflow.py                     # [JOSH] - Simplified LangGraph workflow (~300 lines)
+│   └── config.py                       # [JOSH] - Model configuration system (~200 lines)
 │
 ├── storage/
 │   ├── __init__.py                     # [SHARED]
-│   ├── vector_store.py                 # [TAE] - Simplified ChromaDB integration (~120 lines)
-│   └── database.py                     # [BYEOL] - SQLite schema + basic queries (~150 lines)
+│   ├── vector_store.py                 # [TAE] - ChromaDB integration (~200 lines)
+│   └── database.py                     # [BYEOL] - SQLite operations + queries (~250 lines)
 │
 ├── api/                                # [SUA]
 │   ├── __init__.py                     # [SUA]
@@ -112,9 +125,17 @@
 │
 ├── docs/                               # [SHARED] - All documentation
 │   ├── ROLE_DIVISION.md                # [SHARED] - This file (team responsibilities)
+│   └── team/                           # [SHARED] - Individual CODE_GUIDE.md files
+│       ├── TAE_CODE_GUIDE.md           # [TAE] - Tae's implementation documentation
+│       ├── PAM_CODE_GUIDE.md           # [PAM] - Pam's implementation documentation
+│       ├── SUA_CODE_GUIDE.md           # [SUA] - Sua's implementation documentation
+│       ├── BYEOL_CODE_GUIDE.md         # [BYEOL] - Byeol's implementation documentation
+│       └── JOSH_CODE_GUIDE.md          # [JOSH] - Josh's implementation documentation
 │
-└── db/                                 # [BYEOL]
-    └── schema.sql                      # [BYEOL] - SQLite table definitions (~50 lines)
+└── db/                                 # [BYEOL] - Database storage directory
+    ├── schema.sql                      # [BYEOL] - SQLite table definitions (~50 lines)
+    ├── freshstart.db                   # [BYEOL] - SQLite database file (generated at runtime)
+    └── chroma/                         # [TAE] - ChromaDB vector store files (generated at runtime)
 ```
 
 ---
@@ -176,9 +197,11 @@
    - **NOTE**: Do not begin ensemble work until at least 2 sentiment models are complete and working
 
 9. **ChromaDB Vector Store** (`storage/vector_store.py`)
-   - Simplified ChromaDB wrapper for news embeddings
+   - ChromaDB wrapper for news embeddings
    - Store and retrieve news articles using semantic search
    - Enable explanation agent to find relevant context
+   - **Storage Location**: ChromaDB files stored in `db/chroma/` directory
+   - Persistent storage for news embeddings and metadata
 
 #### Key Design Features:
 - **Individual Model Usage**: Each sentiment model can be used standalone via `BaseSentimentModel` interface
@@ -266,21 +289,24 @@
 ---
 
 ### SUA (Next.js Frontend & FastAPI Backend)
-**Total Estimated LOC: ~600 lines**
+**Total Estimated LOC: ~770 lines**
 
 #### Primary Responsibilities:
 
 **Backend (FastAPI):**
 1. **FastAPI Server** (`api/main.py`)
-   - Create single `/analyze` endpoint
+   - Create `/analyze` endpoint for stock analysis
    - Handle CORS for Next.js frontend access
    - Integrate with LangGraph workflow
    - Error handling and HTTP responses
+   - Logging integration with utils.logging_config
+   - (~250 lines with error handling and logging)
 
 2. **API Models** (`api/models.py`)
    - Define Pydantic request models (AnalysisRequest)
    - Define Pydantic response models (AnalysisResponse)
    - Input validation schemas
+   - (~120 lines with comprehensive validation)
 
 **Frontend (Next.js):**
 3. **Next.js App Layout** (`frontend/src/app/layout.tsx`)
@@ -327,21 +353,30 @@
    - Create indexes for performance
    - Document schema structure
 
-2. **Database Wrapper** (`storage/database.py`)
-   - SQLite connection management
+2. **Database File** (`db/freshstart.db`)
+   - SQLite database file generated at runtime
+   - Located in `db/` directory alongside schema
+   - Persistent storage for all application data
+   - **NOTE**: Automatically created when application first runs
+
+3. **Database Wrapper** (`storage/database.py`)
+   - SQLite connection management with proper path handling
    - CRUD operations for caching
    - Query methods for retrieving cached data
    - Save and retrieve analysis results
+   - Database initialization and migration support
 
 **Key Tables:**
 - `price_cache`: **Store ALL fetched price data** to avoid wasting API calls refetching
 - `news_cache`: **Store ALL fetched news articles** to avoid wasting API calls refetching
 - `analysis_results`: Persist completed analyses for history
+- Additional tables for performance metrics and logging
 
 **Cache Strategy:**
 - Store everything we fetch (no expiration/TTL for now)
 - Don't worry about stale data in MVP phase
 - Focus on avoiding redundant API calls
+- Track cache hits/misses for performance monitoring
 
 **2. Complete Testing Suite**
 1. **Unit Tests** (`tests/unit/`)
@@ -410,14 +445,24 @@
    - State management between agents
    - Error handling and flow control
    - **Model configuration management**: Load and initialize selected models
+   - Performance tracking and logging integration
 
-6. **Model Configuration System** (`coordinator/config.py` - NEW)
+6. **Model Configuration System** (`coordinator/config.py`)
    - **Josh implements config loading logic using PyYAML**
-   - Configuration file or runtime parameters for model selection
+   - Reads from `config.yaml` in project root
+   - Configuration for model selection and ensemble strategies
    - Define which prediction models to use (e.g., LSTM only, LSTM+GRU, all 3)
    - Define which sentiment models to use (e.g., FinBERT only, FinBERT+RoBERTa, all 5)
    - Set ensemble strategies and model weights
    - Enable easy experimentation with different model combinations
+   - Runtime configuration validation
+
+7. **Workflow Configuration File** (`config.yaml`)
+   - YAML configuration for model selection
+   - Prediction model settings (models, weights, ensemble strategy)
+   - Sentiment model settings (models, weights, ensemble strategy)
+   - Workflow settings (reflection enabled, confidence thresholds)
+   - Easy to modify without changing code
 
 #### Workflow Flow:
 ```
@@ -457,6 +502,44 @@ Return to FastAPI → Next.js Frontend
 
 ---
 
+### SHARED UTILITIES & INFRASTRUCTURE
+**Estimated LOC: ~150 lines**
+
+#### Shared Components:
+
+1. **Logging Configuration** (`utils/logging_config.py`)
+   - Centralized logging setup for entire application
+   - Configures log levels, formats, and output destinations
+   - Writes to `logs/freshstart.log`
+   - Console and file logging handlers
+   - Used by ALL components
+
+2. **Cache Metrics** (`utils/cache_metrics.py`)
+   - Performance tracking utilities for database caching
+   - Track cache hit/miss ratios
+   - Monitor API call savings
+   - Used by data fetchers and database wrapper
+
+3. **Application Launcher** (`launch.py`)
+   - Main entry point for running the application
+   - Initializes logging, database, and workflow
+   - Command-line interface for running analyses
+   - Development and testing utilities
+
+4. **Application Logs** (`logs/freshstart.log`)
+   - Runtime log file for debugging and monitoring
+   - Captures all application events, errors, and warnings
+   - Rotated automatically when too large
+   - **NOTE**: Automatically created when application runs
+
+#### Who Uses What:
+- **Logging**: ALL team members use `utils/logging_config.py` in their components
+- **Cache Metrics**: Pam (price fetcher), Tae (news fetcher), Byeol (database)
+- **Launch Script**: ALL team members use `launch.py` to run the system
+- **Logs Directory**: ALL components write to `logs/freshstart.log`
+
+---
+
 ## Integration Points
 
 ### Critical Handoffs:
@@ -493,6 +576,12 @@ Return to FastAPI → Next.js Frontend
 5. **Tae → Josh (Explanation Agent)**
    - ChromaDB vector_store interface for semantic search
    - Method: `search_similar(query, ticker, n_results)`
+   - **Storage Location**: ChromaDB files stored in `db/chroma/` directory
+
+6. **Shared Utilities → ALL Team Members**
+   - Import `utils.logging_config` for consistent logging across all components
+   - Use `utils.cache_metrics` for cache performance tracking (Pam, Tae, Byeol)
+   - All components write logs to `logs/freshstart.log` via logging config
 
 ### Model Configuration Examples:
 
@@ -546,13 +635,14 @@ sentiment_model = SentimentEnsemble(models=models, strategy="weighted_average")
 
 | Team Member | Components | Estimated LOC | Percentage |
 |-------------|------------|---------------|------------|
-| **Tae**     | Base class + 5 Sentiment models + Ensemble, News fetcher, ChromaDB | ~690 lines | 15% |
-| **Pam**     | Base class + 3 Prediction models + Ensemble, Price fetcher, Training scripts | ~980 lines | 21% |
-| **Sua**     | Next.js Frontend + FastAPI Backend | ~600 lines | 13% |
-| **Byeol**   | SQLite database + All Testing (now includes ensemble testing) | ~1,600 lines | 34% |
-| **Josh**    | Agents + LangGraph Coordinator + Model Configuration System | ~820 lines | 17% |
+| **Tae**     | Base class + 5 Sentiment models + Training + Ensemble, News fetcher, ChromaDB | ~890 lines | 16% |
+| **Pam**     | Base class + 3 Prediction models + Ensemble, Price fetcher, Training scripts | ~980 lines | 18% |
+| **Sua**     | Next.js Frontend + FastAPI Backend | ~770 lines | 14% |
+| **Byeol**   | SQLite database + All Testing (includes ensemble testing) | ~1,600 lines | 29% |
+| **Josh**    | Agents + LangGraph Coordinator + Model Config System + config.yaml | ~1,020 lines | 19% |
+| **SHARED**  | Utilities (logging, cache metrics), launch script | ~150 lines | 3% |
 
-**Total: ~4,690 lines** (includes comprehensive test suite + ensemble architecture)
+**Total: ~5,410 lines** (includes comprehensive test suite, ensemble architecture, utilities, and infrastructure)
 
 ---
 
@@ -660,14 +750,22 @@ If you have questions about responsibilities or need clarification on interfaces
 2. Discuss in team channel
 3. Update this document with decisions
 
-**Last Updated**: 2025-11-01
+**Last Updated**: 2025-11-12
+**Recent Changes**:
+- Added `utils/` directory with logging_config.py and cache_metrics.py
+- Added `logs/` directory for application logging
+- Updated `db/` structure to include `freshstart.db` and `chroma/` subdirectory
+- Added `config.yaml` root-level configuration file
+- Added `launch.py` application launcher
+- Updated line count estimates to reflect actual implementation
 
 **Key Technologies:**
-- **Tae**: FinBERT, RoBERTa, Alpha Vantage API, TextBlob, VADER (5 sentiment models) + SentimentEnsemble + ChromaDB (vector store)
+- **Tae**: FinBERT, RoBERTa, Alpha Vantage API, TextBlob, VADER (5 sentiment models) + SentimentEnsemble + ChromaDB (vector store in `db/chroma/`)
 - **Pam**: LSTM, GRU, Gradient Boosting (XGBoost/LightGBM) trained on Kaggle SP500 dataset + PredictionEnsemble
 - **Sua**: Next.js (frontend) + FastAPI (backend)
-- **Byeol**: SQLite + pytest (comprehensive testing including ensemble scenarios)
-- **Josh**: LangChain + LangGraph (agent orchestration) + Model Configuration System + PyYAML (config loading)
+- **Byeol**: SQLite (database in `db/freshstart.db`) + pytest (comprehensive testing including ensemble scenarios)
+- **Josh**: LangChain + LangGraph (agent orchestration) + Model Configuration System + PyYAML (config loading from `config.yaml`)
+- **Shared**: Centralized logging (`utils/logging_config.py` → `logs/freshstart.log`), cache metrics utilities, application launcher
 - **Documentation**: SHARED responsibility across all team members
 
 ---
