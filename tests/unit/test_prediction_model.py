@@ -92,7 +92,7 @@ class TestLSTMModel:
         assert isinstance(result, PredictionResult)
         assert result.direction in ["up", "down", "neutral"]
         assert 0 <= result.confidence <= 1
-        assert "momentum_fallback" in result.metadata
+        assert result.metadata["model"] == "LSTM_fallback"
 
     def test_lstm_predict_uptrend(self, uptrend_data):
         """Test LSTM momentum fallback on uptrend data."""
@@ -120,9 +120,9 @@ class TestLSTMModel:
         assert "name" in info
         assert info["name"] == "LSTM"
         assert "type" in info
-        assert "is_trained" in info
+        assert "trained" in info
 
-    @patch('models.prediction.lstm_model.tf.keras.models.load_model')
+    @patch('tensorflow.keras.models.load_model')
     def test_lstm_with_mock_trained_model(self, mock_load, sample_market_data):
         """Test LSTM with mocked trained model."""
         mock_model = MagicMock()

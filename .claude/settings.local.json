@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest tests/ -v:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(py -m pytest tests/ -v)",
+      "Bash(conda run -n base python -m pytest:*)",
+      "Bash(cmd.exe /c \"conda activate base && python -m pytest tests/ -v\")",
+      "Bash(/c/Users/Home/miniconda3/python.exe -m pytest tests/ -v)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

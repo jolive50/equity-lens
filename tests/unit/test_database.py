@@ -85,7 +85,7 @@ def test_get_cached_news_max_age_filter(test_db, sample_news_data, mock_ticker):
     test_db.cache_news(mock_ticker, sample_news_data)
 
     # Mark cached rows as old
-    cutoff = (datetime.utcnow() - timedelta(minutes=90)).isoformat()
+    cutoff = (datetime.now() - timedelta(minutes=90)).isoformat()
     with test_db._get_connection() as conn:
         conn.execute(
             "UPDATE news_cache SET fetched_at = ? WHERE ticker = ?",

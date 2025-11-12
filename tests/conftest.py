@@ -22,8 +22,20 @@ def test_db():
     db = Database(db_path)
     yield db
 
-    if os.path.exists(db_path):
-        os.unlink(db_path)
+    # Close database connections before cleanup
+    db.close()
+
+    # Small delay to ensure Windows releases file lock
+    import time
+    time.sleep(0.1)
+
+    # Clean up temporary database file
+    try:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+    except PermissionError:
+        # If still locked, try to mark for deletion on next reboot
+        pass
 
 
 @pytest.fixture

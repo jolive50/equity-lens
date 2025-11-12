@@ -49,6 +49,8 @@ def get_historical_data(ticker: str, period: str = "3mo") -> List[Dict[str, Any]
         logger.info(f"Fetched {len(data)} days of data for {ticker}")
         return data
 
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch data for {ticker}: {e}")
         raise RuntimeError(f"Unable to fetch market data for {ticker}: {str(e)}")
@@ -69,10 +71,7 @@ def get_fundamentals(ticker: str) -> Dict[str, float]:
         stock = yf.Ticker(ticker)
         info = stock.info
 
-        if not info:
-            raise ValueError(f"No fundamental data available for {ticker}")
-
-        # Extract key metrics
+        # Extract key metrics with defaults
         fundamentals = {
             "pe_ratio": float(info.get("trailingPE", 0) or 0),
             "forward_pe": float(info.get("forwardPE", 0) or 0),

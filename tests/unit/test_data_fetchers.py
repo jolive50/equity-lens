@@ -42,7 +42,7 @@ class TestPriceDataFetcher:
     """Test suite for price data fetcher."""
 
     @patch('data.fetchers.price_data.yf.Ticker')
-    def test_get_historical_data_success(self, mock_ticker, mock_yfinance_data, mock_ticker):
+    def test_get_historical_data_success(self, mock_ticker, mock_yfinance_data):
         """Test successful historical data fetch."""
         mock_stock = MagicMock()
         mock_stock.history.return_value = mock_yfinance_data

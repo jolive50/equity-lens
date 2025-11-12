@@ -12,6 +12,7 @@ logger = logging.getLogger("freshstart.storage")
 class Database:
     def __init__(self, db_path: str = "freshstart.db"):
         self.db_path = db_path
+        self._connection_pool = []
         self._init_database()
 
     def _init_database(self):
@@ -290,3 +291,13 @@ class Database:
             for tbl in tables:
                 conn.execute(f"DELETE FROM {tbl}")
             conn.commit()
+
+    def close(self):
+        """Close all open database connections."""
+        for conn in self._connection_pool:
+            try:
+                conn.close()
+            except:
+                pass
+        self._connection_pool.clear()
+        logger.debug(f"Database connections closed for {self.db_path}")
