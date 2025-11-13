@@ -1,295 +1,220 @@
-import logging
+# FreshStart/models/sentiment/finbert_model.py
+from __future__ import annotations
+
+import json
 import os
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, Dataset
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import tensorflow as tf
+from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 
-from .base_sentiment import BaseSentimentModel, SentimentResult
+# --- fetcher import (YF only, per design) ---
+from data.fetchers.news_data import fetch_news_yf_only
 
-logger = logging.getLogger(__name__)
+from .base_sentiment import BaseSentiment, normalize_probs
 
-
-class _FinBERTDataset(Dataset):
-    """Simple dataset for FinBERT fine-tuning."""
-
-    def __init__(self, tokenizer: AutoTokenizer, texts: List[str], labels: List[int]):
-        self.encodings = tokenizer(
-            texts,
-            truncation=True,
-            padding=True,
-            max_length=512,
-            return_tensors="pt",
-        )
-        self.labels = torch.tensor(labels, dtype=torch.long)
-
-    def __len__(self) -> int:
-        return len(self.labels)
-
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        item = {key: tensor[idx] for key, tensor in self.encodings.items()}
-        item["labels"] = self.labels[idx]
-        return item
+DEFAULT_FINBERT = os.environ.get("FINBERT_MODEL", "ProsusAI/finbert")
 
 
-class FinBERTModel(BaseSentimentModel):
-    """FinBERT sentiment model powered by PyTorch transformers."""
+class FinBertSentiment(BaseSentiment):
+    """
+    FinBERT wrapper (TensorFlow) that returns 3-class probabilities:
+      {"negative": p0, "neutral": p1, "positive": p2}
 
-    LABEL_MAP = {0: "positive", 1: "negative", 2: "neutral"}
+    Tuning knobs (from your fine-tune):
+      - temperature (default 0.85): softmax over logits/temperature (sharper when <1)
+      - prefer_positive (default 0.03): small additive bias to positive before renorm
+      - neutral_cap (default 0.75): clamp neutral mass after title/body mixing
+    """
 
     def __init__(
         self,
-        model_name: str = "ProsusAI/finbert",
-        weights_path: Optional[str] = None,
-    ):
-        """Initialize FinBERT model."""
+        model_name: str = DEFAULT_FINBERT,
+        *,
+        headline_first: float = 0.65,
+        min_body_words: int = 60,
+        neutral_cap: Optional[float] = 0.75,   # tuned default
+        neg_gate: Optional[float] = None,
+        max_length: int = 514,
+        use_mixed_precision: bool = False,
+        temperature: float = 0.85,             # tuned default
+        prefer_positive: float = 0.03,         # tuned default
+    ) -> None:
+        super().__init__(
+            provider="finbert",
+            headline_first=headline_first,
+            min_body_words=min_body_words,
+            neutral_cap=neutral_cap,
+            neg_gate=neg_gate,
+        )
         self.model_name = model_name
-        self.weights_path = weights_path
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.max_length = max_length
+        self.temperature = float(max(1e-6, temperature))
+        self.prefer_positive = float(max(0.0, prefer_positive))
+        self._tokenizer: Optional[AutoTokenizer] = None
+        self._model: Optional[TFAutoModelForSequenceClassification] = None
+        self._label_ix2key: Optional[Dict[int, str]] = None
+        self._memo: Dict[str, Dict[str, float]] = {}
 
+        if use_mixed_precision:
+            try:
+                tf.keras.mixed_precision.set_global_policy("mixed_float16")
+            except Exception:
+                pass
+
+    # ---------------- lifecycle ----------------
+    def load(self) -> None:
+        if self._tokenizer and self._model and self._label_ix2key:
+            return
         try:
-            tokenizer_source = (
-                weights_path
-                if weights_path and os.path.isdir(weights_path)
-                else model_name
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+            # Many checkpoints (e.g., ProsusAI/finbert) are PT-only → load with from_pt=True
+            self._model = TFAutoModelForSequenceClassification.from_pretrained(
+                self.model_name, from_pt=True
             )
-            model_source = tokenizer_source
-
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_source)
-
-            if weights_path and os.path.isfile(weights_path):
-                state_dict = torch.load(weights_path, map_location="cpu")
-                self.model.load_state_dict(state_dict)
-
-            self.model.to(self.device)
-            self.model.eval()
-
         except Exception as e:
-            raise RuntimeError(f"Failed to load FinBERT: {e}") from e
+            raise RuntimeError(
+                f"Failed to load FinBERT TF model '{self.model_name}'. "
+                "Install: pip install tensorflow tf-keras transformers"
+            ) from e
 
-    def analyze(self, text: str) -> SentimentResult:
-        """Analyze sentiment of a single text snippet."""
-        import time
+        # Label mapping
+        cfg = self._model.config
+        id2label = getattr(cfg, "id2label", None) or {}
+        ix2name: Dict[int, str] = {}
+        for k, v in id2label.items():
+            try:
+                ix2name[int(k)] = str(v)
+            except Exception:
+                pass
 
-        if not text or not text.strip():
-            raise ValueError("Text cannot be empty")
+        def norm_key(name: str) -> str:
+            n = name.strip().lower()
+            if "neg" in n or n == "bearish":
+                return "negative"
+            if "pos" in n or n == "bullish":
+                return "positive"
+            return "neutral"
 
-        try:
-            logger.debug(f"            → FinBERT analyzing: '{text[:50]}...'")
-            analyze_start = time.time()
+        self._label_ix2key = (
+            {ix: norm_key(name) for ix, name in ix2name.items()}
+            if ix2name
+            else {0: "negative", 1: "neutral", 2: "positive"}
+        )
 
-            tokenize_start = time.time()
-            inputs = self.tokenizer(
-                text,
-                return_tensors="pt",
-                truncation=True,
-                padding=True,
-                max_length=512,
-            )
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            tokenize_time = time.time() - tokenize_start
+    # ---------------- internal helpers ----------------
+    def _forward_logits(self, texts: Sequence[str]) -> np.ndarray:
+        assert self._tokenizer is not None and self._model is not None
+        enc = self._tokenizer(
+            list(texts),
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="tf",
+        )
+        out = self._model(**enc, training=False)
+        return out.logits.numpy()  # [B, 3]
 
-            inference_start = time.time()
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                probabilities = torch.nn.functional.softmax(
-                    outputs.logits, dim=-1
-                ).cpu().numpy()[0]
-            inference_time = time.time() - inference_start
+    def _softmax_with_temperature(self, logits: np.ndarray) -> np.ndarray:
+        # logits shape: [B, C]
+        z = logits / self.temperature
+        z = z - np.max(z, axis=-1, keepdims=True)
+        e = np.exp(z)
+        return e / np.clip(np.sum(e, axis=-1, keepdims=True), 1e-9, None)
 
-            label_idx = int(np.argmax(probabilities))
-            label = self.LABEL_MAP[label_idx]
-            confidence = float(probabilities[label_idx])
+    def _logits_to_probs_dicts(self, logits: np.ndarray) -> List[Dict[str, float]]:
+        assert self._label_ix2key is not None
+        # temperature-scaled softmax
+        probs = self._softmax_with_temperature(logits).tolist()  # [B, 3]
+        out: List[Dict[str, float]] = []
+        for row in probs:
+            p: Dict[str, float] = {"negative": 0.0, "neutral": 0.0, "positive": 0.0}
+            for ix, val in enumerate(row):
+                key = self._label_ix2key.get(ix, "neutral")
+                p[key] += float(val)
 
-            total_time = time.time() - analyze_start
-            logger.debug(
-                f"            ✓ FinBERT result: {label} ({confidence:.2f}) "
-                f"[tokenize: {tokenize_time*1000:.1f}ms, inference: {inference_time*1000:.1f}ms, total: {total_time*1000:.1f}ms]"
-            )
+            # small positive preference, then renormalize
+            if self.prefer_positive > 0:
+                p["positive"] += self.prefer_positive
+            p = normalize_probs(p)
+            out.append(p)
+        return out
 
-            return SentimentResult(
-                label=label,
-                confidence=confidence,
-                probabilities={
-                    "positive": float(probabilities[0]),
-                    "negative": float(probabilities[1]),
-                    "neutral": float(probabilities[2]),
-                },
-                metadata={
-                    "model": "FinBERT",
-                    "model_name": self.model_name,
-                    "fine_tuned": self.weights_path is not None,
-                    "device": str(self.device),
-                    "tokenize_time_ms": tokenize_time * 1000,
-                    "inference_time_ms": inference_time * 1000,
-                },
-            )
+    # ---------------- BaseSentiment hook ----------------
+    def _predict_text(self, text: str) -> Dict[str, float]:
+        t = (text or "").strip()
+        if not t:
+            return {"negative": 0.0, "neutral": 1.0, "positive": 0.0}
+        memo = self._memo.get(t)
+        if memo is not None:
+            return memo
+        self.load()
+        logits = self._forward_logits([t])
+        p = self._logits_to_probs_dicts(logits)[0]
+        self._memo[t] = p
+        return p
 
-        except Exception as e:
-            logger.error(f"            ✗ FinBERT analysis failed: {e}")
-            raise RuntimeError(f"FinBERT analysis failed: {e}") from e
 
-    def analyze_batch(self, texts: List[str]) -> List[SentimentResult]:
-        """Analyze sentiment of multiple texts."""
-        if not texts:
-            raise ValueError("Texts list cannot be empty")
+# ---------------- CLI with YF-only fetcher ----------------
+def _cli() -> None:
+    """
+    Run FinBERT (TF) on freshly fetched Yahoo Finance news.
 
-        try:
-            inputs = self.tokenizer(
-                texts,
-                return_tensors="pt",
-                truncation=True,
-                padding=True,
-                max_length=512,
-            )
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+    Example:
+      python -m FreshStart.models.sentiment.finbert_model AAPL --max-items 15
+    """
+    import argparse
+    from textwrap import shorten
 
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                probabilities = torch.nn.functional.softmax(
-                    outputs.logits, dim=-1
-                ).cpu().numpy()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("ticker", help="Stock ticker, e.g., AAPL, MSFT, NVDA")
+    ap.add_argument("--neutral-cap", type=float, default=0.75)
+    ap.add_argument("--neg-gate", type=float, default=None)
+    ap.add_argument("--max-items", type=int, default=25, help="Max YF items to fetch (default 25)")
+    ap.add_argument("--mixed-precision", action="store_true", help="Enable TF mixed precision")
+    ap.add_argument("--temperature", type=float, default=0.85, help="Softmax temperature (<1 sharper)")
+    ap.add_argument("--prefer-positive", type=float, default=0.03, help="Additive bias to positive prob")
+    args = ap.parse_args()
 
-            results = []
-            for probs in probabilities:
-                label_idx = int(np.argmax(probs))
-                label = self.LABEL_MAP[label_idx]
-                confidence = float(probs[label_idx])
+    # Init model with tuned params
+    model = FinBertSentiment(
+        neutral_cap=args.neutral_cap,
+        neg_gate=args.neg_gate,
+        use_mixed_precision=args.mixed_precision,
+        temperature=args.temperature,
+        prefer_positive=args.prefer_positive,
+    )
+    model.load()
 
-                results.append(
-                    SentimentResult(
-                        label=label,
-                        confidence=confidence,
-                        probabilities={
-                            "positive": float(probs[0]),
-                            "negative": float(probs[1]),
-                            "neutral": float(probs[2]),
-                        },
-                        metadata={
-                            "model": "FinBERT",
-                            "model_name": self.model_name,
-                            "fine_tuned": self.weights_path is not None,
-                        },
-                    )
-                )
+    # Fetch YF-only articles (already cleaned/trimmed by fetcher)
+    print(f"\nFetching Yahoo Finance news for {args.ticker} (max {args.max_items})\n")
+    try:
+        items = fetch_news_yf_only(args.ticker, max_items=args.max_items)
+    except Exception as e:
+        print(f"Failed to fetch YF news: {e}")
+        items = []
 
-            return results
+    print(f"Returned: {len(items)} articles\n")
 
-        except Exception as e:
-            raise RuntimeError(f"FinBERT batch analysis failed: {e}") from e
+    # Score with FinBERT using the fetcher schema
+    results = model.predict_batch_from_fetcher(items)
+    out = [r.to_dict() for r in results]
 
-    def fine_tune(
-        self,
-        train_texts: List[str],
-        train_labels: List[int],
-        val_texts: Optional[List[str]] = None,
-        val_labels: Optional[List[int]] = None,
-        epochs: int = 3,
-        batch_size: int = 16,
-        learning_rate: float = 2e-5,
-        output_dir: str = "./finbert_finetuned",
-    ) -> Dict[str, Any]:
-        """Fine-tune FinBERT on a labeled dataset."""
-        if len(train_texts) != len(train_labels):
-            raise ValueError("Texts and labels must have same length")
-        if val_texts and val_labels and len(val_texts) != len(val_labels):
-            raise ValueError("Validation texts and labels must have same length")
+    # Compact YF summary
+    for i, r in enumerate(results, 1):
+        src = (r.meta.get("source") or "yahoo").strip().lower()
+        if src in ("finance.yahoo.com", "yahoo/unknown"):
+            src = "yahoo"
+        tpub = r.meta.get("time_published") or "-"
+        title = shorten((items[i - 1].get("title") or "").strip(), width=90, placeholder=" [...]")
+        lab = r.label.name.capitalize()
+        print(f"YF {i:02d}. [{lab:7}] [{src:8}] {tpub}  {title}")
 
-        train_dataset = _FinBERTDataset(self.tokenizer, train_texts, train_labels)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    # Full JSON
+    print("\n--- JSON OUTPUT ---")
+    print(json.dumps(out, indent=2, ensure_ascii=False))
 
-        val_loader = None
-        if val_texts and val_labels:
-            val_dataset = _FinBERTDataset(self.tokenizer, val_texts, val_labels)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=learning_rate)
-
-        history = {
-            "epochs": epochs,
-            "train_loss": [],
-            "train_accuracy": [],
-            "val_loss": [],
-            "val_accuracy": [],
-        }
-
-        for _ in range(epochs):
-            self.model.train()
-            running_loss = 0.0
-            correct = 0
-            total = 0
-
-            for batch in train_loader:
-                batch = {k: v.to(self.device) for k, v in batch.items()}
-                optimizer.zero_grad()
-
-                outputs = self.model(**batch)
-                loss = outputs.loss
-                loss.backward()
-                optimizer.step()
-
-                running_loss += loss.item() * batch["labels"].size(0)
-                preds = outputs.logits.argmax(dim=-1)
-                correct += (preds == batch["labels"]).sum().item()
-                total += batch["labels"].size(0)
-
-            train_loss = running_loss / max(total, 1)
-            train_acc = correct / max(total, 1)
-            history["train_loss"].append(train_loss)
-            history["train_accuracy"].append(train_acc)
-
-            if val_loader:
-                self.model.eval()
-                val_loss_total = 0.0
-                val_correct = 0
-                val_total = 0
-
-                with torch.no_grad():
-                    for batch in val_loader:
-                        batch = {k: v.to(self.device) for k, v in batch.items()}
-                        outputs = self.model(**batch)
-                        loss = outputs.loss
-                        val_loss_total += loss.item() * batch["labels"].size(0)
-                        preds = outputs.logits.argmax(dim=-1)
-                        val_correct += (preds == batch["labels"]).sum().item()
-                        val_total += batch["labels"].size(0)
-
-                history["val_loss"].append(
-                    val_loss_total / max(val_total, 1)
-                )
-                history["val_accuracy"].append(
-                    val_correct / max(val_total, 1)
-                )
-
-        os.makedirs(output_dir, exist_ok=True)
-        self.model.save_pretrained(output_dir)
-        self.tokenizer.save_pretrained(output_dir)
-        self.weights_path = output_dir
-
-        return {
-            "epochs": epochs,
-            "final_train_loss": history["train_loss"][-1] if history["train_loss"] else None,
-            "final_train_accuracy": history["train_accuracy"][-1]
-            if history["train_accuracy"]
-            else None,
-            "final_val_loss": history["val_loss"][-1] if history["val_loss"] else None,
-            "final_val_accuracy": history["val_accuracy"][-1]
-            if history["val_accuracy"]
-            else None,
-            "weights_saved_to": output_dir,
-        }
-
-    def get_model_info(self) -> Dict[str, Any]:
-        """Return model metadata."""
-        return {
-            "name": "FinBERT",
-            "version": self.model_name,
-            "type": "transformer",
-            "backend": "pytorch",
-            "capabilities": ["analyze", "analyze_batch", "fine_tune"],
-            "fine_tuned": self.weights_path is not None,
-            "weights_path": self.weights_path,
-        }
+if __name__ == "__main__":
+    _cli()

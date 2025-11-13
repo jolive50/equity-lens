@@ -82,24 +82,95 @@ class GradientBoostModel(BasePredictionModel):
             return self._fallback_prediction(data)
 
     def _extract_features(self, data: pd.DataFrame) -> np.ndarray:
-        """Extract features for Gradient Boost."""
-        if len(data) < 20:
-            raise ValueError("Need at least 20 days of data")
+        """Extract features for Gradient Boost (Research-Enhanced).
 
-        features = []
+        Uses comprehensive feature set matching training pipeline to maximize
+        XGBoost performance (research shows 60-65% accuracy with proper features).
 
-        # Price returns
-        features.append(data['close'].pct_change(1).iloc[-1])
-        features.append(data['close'].pct_change(5).iloc[-1])
-        features.append(data['close'].pct_change(10).iloc[-1])
+        Args:
+            data: DataFrame with OHLCV data
+
+        Returns:
+            Numpy array shaped (1, n_features)
+        """
+        if len(data) < 252:  # Need enough for annual returns
+            raise ValueError("Need at least 252 days of data for enhanced features")
+
+        df = data.copy()
+
+        # Lagged returns
+        returns_1d = df['close'].pct_change(1).iloc[-1]
+        returns_5d = df['close'].pct_change(5).iloc[-1]
+        returns_10d = df['close'].pct_change(10).iloc[-1]
+        returns_20d = df['close'].pct_change(20).iloc[-1]
+        returns_60d = df['close'].pct_change(60).iloc[-1]
+        returns_252d = df['close'].pct_change(252).iloc[-1] if len(df) >= 252 else 0.0
+
+        # RSI
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / (loss + 1e-10)
+        rsi_14 = (100 - (100 / (1 + rs))).iloc[-1]
+
+        # MACD
+        ema_12 = df['close'].ewm(span=12, adjust=False).mean()
+        ema_26 = df['close'].ewm(span=26, adjust=False).mean()
+        macd = (ema_12 - ema_26).iloc[-1]
+        macd_signal = (ema_12 - ema_26).ewm(span=9, adjust=False).mean().iloc[-1]
+        macd_diff = macd - macd_signal
+
+        # Bollinger Bands
+        bb_ma = df['close'].rolling(20).mean().iloc[-1]
+        bb_std = df['close'].rolling(20).std().iloc[-1]
+        bb_upper = bb_ma + (2 * bb_std)
+        bb_lower = bb_ma - (2 * bb_std)
+        bb_width = (bb_upper - bb_lower) / (bb_ma + 1e-10)
+        bb_position = (df['close'].iloc[-1] - bb_lower) / (bb_upper - bb_lower + 1e-10)
+
+        # Moving averages
+        sma_5 = df['close'].rolling(5).mean().iloc[-1]
+        sma_10 = df['close'].rolling(10).mean().iloc[-1]
+        sma_20 = df['close'].rolling(20).mean().iloc[-1]
+        sma_50 = df['close'].rolling(50).mean().iloc[-1]
+        sma_200 = df['close'].rolling(200).mean().iloc[-1]
+        sma_5_20_cross = (sma_5 / (sma_20 + 1e-10)) - 1
+        sma_50_200_cross = (sma_50 / (sma_200 + 1e-10)) - 1
+
+        # Volatility
+        volatility_10d = df['close'].pct_change(1).rolling(10).std().iloc[-1]
+        volatility_20d = df['close'].pct_change(1).rolling(20).std().iloc[-1]
+        volatility_60d = df['close'].pct_change(1).rolling(60).std().iloc[-1]
 
         # Volume
-        features.append(data['volume'].iloc[-1] / data['volume'].rolling(10).mean().iloc[-1])
+        volume_ma_10 = df['volume'].rolling(10).mean().iloc[-1]
+        volume_ma_20 = df['volume'].rolling(20).mean().iloc[-1]
+        volume_ratio = df['volume'].iloc[-1] / (volume_ma_10 + 1e-10)
+        volume_trend = volume_ma_10 / (volume_ma_20 + 1e-10)
 
-        # Simple moving averages
-        sma_5 = data['close'].rolling(5).mean().iloc[-1]
-        sma_20 = data['close'].rolling(20).mean().iloc[-1]
-        features.append(1.0 if sma_5 > sma_20 else 0.0)
+        # Momentum
+        momentum_10d = df['close'].iloc[-1] / df['close'].iloc[-11] - 1 if len(df) > 10 else 0.0
+        momentum_20d = df['close'].iloc[-1] / df['close'].iloc[-21] - 1 if len(df) > 20 else 0.0
+
+        # Spread
+        hl_spread = (df['high'].iloc[-1] - df['low'].iloc[-1]) / df['close'].iloc[-1]
+        hl_spread_ma = ((df['high'] - df['low']) / df['close']).rolling(10).mean().iloc[-1]
+
+        # Assemble features in same order as training
+        features = [
+            returns_1d, returns_5d, returns_10d, returns_20d, returns_60d, returns_252d,
+            rsi_14, macd, macd_signal, macd_diff,
+            bb_width, bb_position,
+            sma_5, sma_10, sma_20, sma_50, sma_200,
+            sma_5_20_cross, sma_50_200_cross,
+            volatility_10d, volatility_20d, volatility_60d,
+            volume_ratio, volume_trend,
+            momentum_10d, momentum_20d,
+            hl_spread, hl_spread_ma
+        ]
+
+        # Replace NaN with 0
+        features = [0.0 if pd.isna(f) else f for f in features]
 
         return np.array([features])
 
