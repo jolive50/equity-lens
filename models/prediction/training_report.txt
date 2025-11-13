@@ -1,25 +1,95 @@
-============================================================
-FreshStart - Model Training Report
-============================================================
+================================================================================
+FreshStart - Combined Model Training Report
+================================================================================
 
+================================================================================
+XGBoost Model Results
+================================================================================
 
-LSTM Model:
+Training Information:
 ----------------------------------------
-  train_accuracy: 0.5585
-  val_accuracy: 0.5668
-  train_loss: 0.9742
-  val_loss: 0.9709
+  Training time: 0.87 hours
 
-GRU Model:
+Hyperparameters:
 ----------------------------------------
-  train_accuracy: 0.5589
-  val_accuracy: 0.5642
-  train_loss: 0.9719
-  val_loss: 0.9770
+  colsample_bytree: 1.0
+  gamma: 0
+  learning_rate: 0.05
+  max_depth: 7
+  min_child_weight: 1
+  n_estimators: 200
+  subsample: 0.8
 
-GradientBoost Model:
+Accuracy Metrics:
 ----------------------------------------
-  train_accuracy: 0.5952
-  val_accuracy: 0.5713
+  Train accuracy: 0.4762
+  Val accuracy:   0.4217
 
-============================================================
+Per-Class Performance:
+----------------------------------------
+
+  DOWN:
+    Precision: 0.4141
+    Recall:    0.1462
+    F1-score:  0.2161
+
+  NEUTRAL:
+    Precision: 0.4329
+    Recall:    0.5510
+    F1-score:  0.4849
+
+  UP:
+    Precision: 0.4138
+    Recall:    0.5488
+    F1-score:  0.4718
+
+Confusion Matrix:
+----------------------------------------
+                    Predicted
+              Down    Neutral    Up
+Actual Down    3456      8149    12040
+       Neutral 1866      13184    8878
+       Up      3023      9120    14767
+
+Financial Evaluation (Simulated Trading):
+----------------------------------------
+  Expected Value/Trade:  +0.0359%
+  Average Profit:        0.5000%
+  Average Loss:          0.5000%
+  Payoff Asymmetry:      1.0000x
+  Win Rate:              41.39%
+  Total Trades:          44030
+  Winning Trades:        18223
+  Losing Trades:         15063
+
+  Interpretation:
+    ✓ POSITIVE expectancy: Strategy is profitable on average
+    ✗ Losers larger than winners (poor risk/reward)
+
+
+================================================================================
+Model Comparison Summary
+================================================================================
+
+Validation Accuracy:
+  XGBoost        : 0.4217
+
+Expected Value per Trade:
+  XGBoost        : +0.0359%
+
+Payoff Asymmetry (Profit/Loss Ratio):
+  XGBoost        : 1.0000x
+
+Win Rate:
+  XGBoost        : 41.39%
+
+================================================================================
+Recommendation
+================================================================================
+
+Best model by Expected Value: XGBoost
+Expected Value per Trade: +0.0359%
+
+================================================================================
+End of Report
+================================================================================

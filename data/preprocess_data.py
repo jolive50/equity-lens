@@ -386,11 +386,32 @@ class DataPreprocessor:
         if not successful_stocks:
             raise ValueError("No stocks processed successfully")
 
-        # Combine all data
-        X_lstm_combined = np.vstack(X_lstm_all)
-        y_lstm_combined = np.concatenate(y_lstm_all)
-        X_gb_combined = np.vstack(X_gb_all)
-        y_gb_combined = np.concatenate(y_gb_all)
+        # Combine all data (with memory monitoring)
+        logger.info(f"\nCombining data from {len(successful_stocks)} stocks...")
+        logger.info(f"  (This may take a moment for large datasets)")
+
+        try:
+            X_lstm_combined = np.vstack(X_lstm_all)
+            y_lstm_combined = np.concatenate(y_lstm_all)
+
+            # Free memory
+            del X_lstm_all
+            del y_lstm_all
+
+            X_gb_combined = np.vstack(X_gb_all)
+            y_gb_combined = np.concatenate(y_gb_all)
+
+            # Free memory
+            del X_gb_all
+            del y_gb_all
+
+            import gc
+            gc.collect()
+
+        except MemoryError:
+            logger.error("\n✗ Out of memory while combining data!")
+            logger.error("Recommendation: Reduce max_stocks parameter")
+            raise
 
         logger.info(f"\n✓ Combined data:")
         logger.info(f"  - LSTM/GRU: {X_lstm_combined.shape} sequences")
@@ -487,6 +508,26 @@ class DataPreprocessor:
 
 def main():
     """Main entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Preprocess stock data for training')
+    parser.add_argument(
+        '--max-stocks',
+        type=int,
+        default=100,
+        help='Maximum number of stocks to process (default: 100, use 0 for all)'
+    )
+    parser.add_argument(
+        '--sequence-length',
+        type=int,
+        default=60,
+        help='Sequence length for LSTM/GRU (default: 60)'
+    )
+    args = parser.parse_args()
+
+    # Handle "all stocks" case
+    max_stocks = None if args.max_stocks == 0 else args.max_stocks
+
     logger.info("=" * 60)
     logger.info("FreshStart - Data Preprocessing")
     logger.info("=" * 60)
@@ -494,9 +535,11 @@ def main():
     preprocessor = DataPreprocessor()
 
     try:
-        # Process stocks (Research-Enhanced: 60-day sequences, all stocks)
-        # WARNING: Processing all stocks significantly increases training time
-        data = preprocessor.process_all_stocks(max_stocks=None, sequence_length=60)
+        # Process stocks with configurable limits
+        data = preprocessor.process_all_stocks(
+            max_stocks=max_stocks,
+            sequence_length=args.sequence_length
+        )
 
         # Create splits
         splits = preprocessor.create_train_val_test_split(data)
