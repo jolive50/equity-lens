@@ -525,6 +525,80 @@ class DataPreprocessor:
         logger.info(f"  GB Val:   {len(splits['X_gb_val'])}")
         logger.info(f"  GB Test:  {len(splits['X_gb_test'])}")
 
+        # Class distribution analysis
+        logger.info(f"\n{'='*60}")
+        logger.info("Class Distribution Analysis")
+        logger.info(f"{'='*60}")
+
+        class_names = {0: 'Down', 1: 'Neutral', 2: 'Up'}
+
+        # LSTM/GRU class distribution
+        logger.info(f"\nLSTM/GRU Data:")
+        for split_name, labels_key in [('Train', 'y_lstm_train'), ('Val', 'y_lstm_val'), ('Test', 'y_lstm_test')]:
+            labels = splits[labels_key]
+            total = len(labels)
+            logger.info(f"\n  {split_name} Set ({total} samples):")
+            for class_id in [0, 1, 2]:
+                count = np.sum(labels == class_id)
+                pct = (count / total * 100) if total > 0 else 0
+                logger.info(f"    {class_names[class_id]:7s}: {count:6d} ({pct:5.2f}%)")
+
+        # Gradient Boost class distribution
+        logger.info(f"\nGradient Boost Data:")
+        for split_name, labels_key in [('Train', 'y_gb_train'), ('Val', 'y_gb_val'), ('Test', 'y_gb_test')]:
+            labels = splits[labels_key]
+            total = len(labels)
+            logger.info(f"\n  {split_name} Set ({total} samples):")
+            for class_id in [0, 1, 2]:
+                count = np.sum(labels == class_id)
+                pct = (count / total * 100) if total > 0 else 0
+                logger.info(f"    {class_names[class_id]:7s}: {count:6d} ({pct:5.2f}%)")
+
+        # Sample training data
+        logger.info(f"\n{'='*60}")
+        logger.info("Sample Training Data (First 5 Samples)")
+        logger.info(f"{'='*60}")
+
+        logger.info(f"\nLSTM/GRU Training Samples:")
+        logger.info(f"  Shape: {splits['X_lstm_train'].shape} (samples, timesteps, features)")
+        num_samples = min(5, len(splits['X_lstm_train']))
+        for i in range(num_samples):
+            label = splits['y_lstm_train'][i]
+            actual_return = splits['returns_lstm_train'][i]
+            logger.info(f"\n  Sample {i+1}:")
+            logger.info(f"    Sequence shape: {splits['X_lstm_train'][i].shape}")
+            logger.info(f"    Last timestep (most recent): {splits['X_lstm_train'][i][-1][:5]}... (showing first 5 features)")
+            logger.info(f"    Label: {label} ({class_names[label]})")
+            logger.info(f"    Actual return: {actual_return*100:+.4f}%")
+
+        logger.info(f"\nGradient Boost Training Samples:")
+        logger.info(f"  Shape: {splits['X_gb_train'].shape} (samples, features)")
+        num_samples = min(5, len(splits['X_gb_train']))
+        for i in range(num_samples):
+            label = splits['y_gb_train'][i]
+            actual_return = splits['returns_gb_train'][i]
+            logger.info(f"\n  Sample {i+1}:")
+            logger.info(f"    Features (first 5): {splits['X_gb_train'][i][:5]}...")
+            logger.info(f"    Label: {label} ({class_names[label]})")
+            logger.info(f"    Actual return: {actual_return*100:+.4f}%")
+
+        # Return statistics
+        logger.info(f"\n{'='*60}")
+        logger.info("Return Statistics")
+        logger.info(f"{'='*60}")
+
+        for split_name, returns_key in [('Train', 'returns_lstm_train'), ('Val', 'returns_lstm_val'), ('Test', 'returns_lstm_test')]:
+            returns = splits[returns_key]
+            # Filter out NaN values for statistics
+            valid_returns = returns[~np.isnan(returns)]
+            if len(valid_returns) > 0:
+                logger.info(f"\n  LSTM {split_name} Returns:")
+                logger.info(f"    Mean:   {np.mean(valid_returns)*100:+.4f}%")
+                logger.info(f"    Median: {np.median(valid_returns)*100:+.4f}%")
+                logger.info(f"    Std:    {np.std(valid_returns)*100:.4f}%")
+                logger.info(f"    Min:    {np.min(valid_returns)*100:+.4f}%")
+                logger.info(f"    Max:    {np.max(valid_returns)*100:+.4f}%")
+
         # Save splits
         output_file = self.processed_data_dir / "training_splits.npz"
         np.savez(output_file, **splits)
