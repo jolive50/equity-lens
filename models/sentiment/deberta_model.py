@@ -13,10 +13,7 @@ from transformers import (
 )
 
 # --- fetcher (YF-only per your latest design) ---
-try:
-    from FreshStart.data.fetchers.news_data import fetch_news_yf_only
-except ModuleNotFoundError:
-    from ...data.fetchers.news_data import fetch_news_yf_only
+from data.fetchers.news_data import fetch_news_yf_only
 
 from .base_sentiment import (
     BaseSentiment,

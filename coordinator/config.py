@@ -121,59 +121,54 @@ class WorkflowConfig:
             return LSTMModel()
 
     def get_sentiment_model(self):
-        """Get configured sentiment model instance.
+        """Get configured sentiment model instance using new API.
 
         Returns:
-            BaseSentimentModel instance or None
+            BaseSentiment instance (new API) or None
         """
-        from models.sentiment.finbert_model import FinBERTModel
-        from models.sentiment.roberta_model import RoBERTaModel
-        from models.sentiment.vader_model import VADERModel
-        from models.sentiment.textblob_model import TextBlobModel
-        from models.sentiment.ensemble import SentimentEnsemble
+        from models.sentiment import FinBertSentiment, RobertaSentiment, SentimentEnsemble
 
         if self.use_sentiment_ensemble and len(self.sentiment_models) >= 2:
-            # Create ensemble
-            models = []
+            # Create ensemble - only supports FinBERT, RoBERTa (new API models)
+            finbert_model = None
+            roberta_model = None
+
             for model_name in self.sentiment_models:
                 try:
                     if model_name == "FinBERT":
-                        models.append(FinBERTModel())
+                        finbert_model = FinBertSentiment()
+                        logger.info("Created FinBERT for ensemble")
                     elif model_name == "RoBERTa":
-                        models.append(RoBERTaModel())
-                    elif model_name == "VADER":
-                        models.append(VADERModel())
-                    elif model_name == "TextBlob":
-                        models.append(TextBlobModel())
+                        roberta_model = RobertaSentiment()
+                        logger.info("Created RoBERTa for ensemble")
+                    else:
+                        logger.warning(f"{model_name} not supported - only FinBERT and RoBERTa available")
                 except Exception as e:
-                    logger.warning(f"Failed to load sentiment model {model_name}: {e}")
+                    logger.warning(f"Failed to create sentiment model {model_name}: {e}")
                     continue
 
-            if len(models) >= 2:
+            # Create ensemble if we have at least one model
+            if finbert_model or roberta_model:
                 return SentimentEnsemble(
-                    models=models,
-                    strategy=self.sentiment_ensemble_strategy,
+                    finbert=finbert_model,
+                    roberta=roberta_model,
                     weights=self.sentiment_model_weights
                 )
             else:
-                logger.warning("Not enough sentiment models for ensemble, using single model")
-                return models[0] if models else FinBERTModel()
+                logger.warning("No models loaded for ensemble, falling back to FinBERT")
+                return FinBertSentiment()
 
         # Single model
         model_name = self.sentiment_models[0] if self.sentiment_models else "FinBERT"
 
         try:
             if model_name == "FinBERT":
-                return FinBERTModel()
+                return FinBertSentiment()
             elif model_name == "RoBERTa":
-                return RoBERTaModel()
-            elif model_name == "VADER":
-                return VADERModel()
-            elif model_name == "TextBlob":
-                return TextBlobModel()
+                return RobertaSentiment()
             else:
-                logger.warning(f"Unknown sentiment model {model_name}, using FinBERT")
-                return FinBERTModel()
+                logger.warning(f"Model {model_name} not supported (only FinBERT/RoBERTa), using FinBERT")
+                return FinBertSentiment()
         except Exception as e:
             logger.error(f"Failed to load sentiment model {model_name}: {e}")
             return None

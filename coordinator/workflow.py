@@ -394,10 +394,9 @@ def create_freshstart_workflow(
             )
         else:
             try:
-                from data.fetchers.news_data import NewsDataFetcher
+                from data.fetchers.news_data import fetch_news_yf_only
 
-                news_fetcher = NewsDataFetcher()
-                news_articles = news_fetcher.fetch_news(ticker, limit=news_limit)
+                news_articles = fetch_news_yf_only(ticker, max_items=news_limit)
                 state["news_data"] = news_articles
 
                 logger.info(f"      ✓ Fetched fresh news: {len(news_articles)} articles [API CALL]")

@@ -16,15 +16,8 @@ from .base_sentiment import (
 )
 
 # Fetchers
-try:
-    from FreshStart.data.fetchers.news_data import fetch_news_yf_only
-except Exception:
-    from ...data.fetchers.news_data import fetch_news_yf_only
-
-try:
-    from FreshStart.models.sentiment.alpha_vantage_sentiment import fetch_alpha_vantage_news
-except Exception:
-    from .alpha_vantage_sentiment import fetch_alpha_vantage_news
+from data.fetchers.news_data import fetch_news_yf_only
+from .alpha_vantage_sentiment import fetch_alpha_vantage_news
 
 
 def _soft_vote(model_probs: Dict[str, Dict[str, float]], weights: Dict[str, float]) -> Dict[str, float]:
@@ -258,6 +251,66 @@ class SentimentEnsemble:
         triples = [("negative", -1), ("neutral", 0), ("positive", 1)]
         best = max(triples, key=lambda kv: p.get(kv[0], 0.0))
         return best[1]
+
+    def get_model_info(self) -> Dict[str, Any]:
+        """Return model metadata for compatibility with workflow."""
+        model_names = list(self.models.keys())
+        return {
+            "name": "SentimentEnsemble",
+            "version": "1.0",
+            "type": "ensemble",
+            "strategy": "weighted_soft_vote",
+            "models": model_names,
+            "weights": self.weights,
+            "av_trust_mode": self.av_trust_mode
+        }
+
+    def analyze(self, text: str):
+        """Legacy API compatibility - analyze a single text string.
+
+        Args:
+            text: Text to analyze
+
+        Returns:
+            LegacySentimentResult-like object with label, confidence, probabilities
+        """
+        from dataclasses import dataclass
+
+        # Create a mock news item for the ensemble
+        item = {
+            "id": "legacy_text",
+            "title": text,
+            "body": "",
+            "word_count": len(text.split()),
+            "provider": "legacy",
+            "source": "unknown"
+        }
+
+        # Use the ensemble's predict_one method
+        result = self.predict_one(item)
+
+        # Convert to legacy 3-class format
+        label_map = {
+            -2: "negative",
+            -1: "negative",
+            0: "neutral",
+            1: "positive",
+            2: "positive"
+        }
+        label_3class = label_map.get(int(result.label), "neutral")
+
+        # Return object with legacy API attributes
+        @dataclass
+        class LegacyResult:
+            label: str
+            confidence: float
+            probabilities: Dict[str, float]
+
+        return LegacyResult(
+            label=label_3class,
+            confidence=result.confidence,
+            probabilities=result.probs
+        )
 
 
 # ---------------- CLI (optional helper to demo mix of AV + YF) ----------------

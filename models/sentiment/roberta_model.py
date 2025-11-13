@@ -10,10 +10,7 @@ import tensorflow as tf
 from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 
 # --- fetcher import (YF only, per design) ---
-try:
-    from FreshStart.data.fetchers.news_data import fetch_news_yf_only
-except ModuleNotFoundError:
-    from ...data.fetchers.news_data import fetch_news_yf_only
+from data.fetchers.news_data import fetch_news_yf_only
 
 from .base_sentiment import BaseSentiment, normalize_probs
 

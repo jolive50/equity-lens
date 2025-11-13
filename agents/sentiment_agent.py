@@ -31,18 +31,12 @@ class SentimentAgent:
         if sentiment_model is None:
             # Use Tae's FinBERT model as default (best for financial sentiment)
             try:
-                from models.sentiment.finbert_model import FinBERTModel
-                self.sentiment_model = FinBERTModel()
+                from models.sentiment import FinBertSentiment
+                self.sentiment_model = FinBertSentiment()
                 logger.info("SentimentAgent initialized with FinBERT model")
             except Exception as e:
-                logger.warning(f"Failed to load FinBERT, trying VADER fallback: {e}")
-                try:
-                    from models.sentiment.vader_model import VADERModel
-                    self.sentiment_model = VADERModel()
-                    logger.info("SentimentAgent initialized with VADER model")
-                except Exception as e2:
-                    logger.error(f"Failed to load any sentiment model: {e2}")
-                    self.sentiment_model = None
+                logger.error(f"Failed to load FinBERT model: {e}")
+                self.sentiment_model = None
         else:
             self.sentiment_model = sentiment_model
             logger.info(f"SentimentAgent initialized with {sentiment_model.get_model_info()['name']}")
@@ -91,43 +85,55 @@ class SentimentAgent:
                 headlines=[article.get("title", "") for article in news_data[:3]]
             )
 
-        # Use REAL sentiment analysis with Tae's models
+        # Use REAL sentiment analysis with Tae's new API
         logger.info(f"         → Analyzing top 10 articles...")
         sentiment_results = []
         headlines = []
 
         for idx, article in enumerate(news_data[:10], 1):  # Analyze top 10 articles
             title = article.get("title", "")
-            content = article.get("content", "") or article.get("summary", "")
+            body = article.get("body", "") or article.get("content", "") or article.get("summary", "")
 
-            if not title and not content:
+            if not title:
                 continue
 
             headlines.append(title)
 
-            # Analyze using REAL ML model (FinBERT or VADER)
+            # Analyze using new API - predict_one() with news item
             try:
-                # Combine title and content for better analysis
-                text_to_analyze = f"{title}. {content[:200]}" if content else title
+                # Prepare item for new API
+                news_item = {
+                    "id": article.get("id", f"article_{idx}"),
+                    "title": title,
+                    "body": body,
+                    "word_count": article.get("word_count", len(body.split()) if body else 0),
+                    "provider": article.get("provider", "unknown"),
+                    "source": article.get("source", "unknown"),
+                    "url": article.get("url", ""),
+                    "time_published": article.get("time_published", "")
+                }
 
-                result = self.sentiment_model.analyze(text_to_analyze)
+                # Use new API
+                result = self.sentiment_model.predict_one(news_item)
 
-                # Convert sentiment label to score
-                if result.label == "positive":
-                    score = 0.5 + (result.confidence * 0.5)  # 0.5-1.0
-                elif result.label == "negative":
-                    score = 0.5 - (result.confidence * 0.5)  # 0.0-0.5
-                else:  # neutral
-                    score = 0.5
+                # Convert 5-class label to 3-class and score
+                label_map = {
+                    -2: ("negative", 0.0),   # strongly negative
+                    -1: ("negative", 0.25),  # negative
+                    0: ("neutral", 0.5),     # neutral
+                    1: ("positive", 0.75),   # positive
+                    2: ("positive", 1.0)     # strongly positive
+                }
+                label_3class, score = label_map.get(int(result.label), ("neutral", 0.5))
 
                 sentiment_results.append({
                     "score": score,
-                    "label": result.label,
+                    "label": label_3class,
                     "confidence": result.confidence,
-                    "probabilities": result.probabilities
+                    "probabilities": result.probs
                 })
 
-                logger.debug(f"         Article {idx}: {result.label} ({result.confidence:.2f}) - {title[:40]}...")
+                logger.debug(f"         Article {idx}: {label_3class} ({result.confidence:.2f}) - {title[:40]}...")
 
             except Exception as e:
                 logger.warning(f"         ⚠️  Failed to analyze article {idx}: {e}")

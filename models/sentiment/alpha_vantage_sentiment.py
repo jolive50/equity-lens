@@ -12,7 +12,7 @@ from textwrap import shorten
 
 # Reuse title cleaner from YF fetcher if available
 try:
-    from FreshStart.data.fetchers.news_data import _clean_title  # type: ignore
+    from data.fetchers.news_data import _clean_title  # type: ignore
 except Exception:
     def _clean_title(s: str, *, max_len: int = 140) -> str:
         s = (s or "").replace("\u00a0", " ").strip()

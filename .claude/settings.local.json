@@ -9,7 +9,12 @@
       "Bash(/c/Users/Home/miniconda3/python.exe -m pytest tests/ -v)",
       "Bash(sqlite3:*)",
       "Bash(python:*)",
-      "Bash(C:/Users/Home/miniconda3/python.exe:*)"
+      "Bash(C:/Users/Home/miniconda3/python.exe:*)",
+      "Bash(curl:*)",
+      "Bash(timeout 5 C:/Users/Home/miniconda3/python.exe:*)",
+      "Bash(find:*)",
+      "Bash(timeout 30 C:/Users/Home/miniconda3/python.exe:*)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []
