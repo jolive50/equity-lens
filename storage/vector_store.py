@@ -2,7 +2,11 @@ import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+import logging
 import os
+import time
+
+logger = logging.getLogger("freshstart.storage.chromadb")
 
 
 class NewsVectorStore:
@@ -25,20 +29,39 @@ class NewsVectorStore:
         Raises:
             RuntimeError: If ChromaDB initialization fails
         """
+        logger.info(f"🔄 Initializing ChromaDB vector store")
+        logger.info(f"   Persist directory: {persist_directory}")
+        logger.info(f"   Collection name: {collection_name}")
+        init_start = time.time()
+
         try:
             os.makedirs(persist_directory, exist_ok=True)
 
+            client_start = time.time()
             self.client = chromadb.PersistentClient(
                 path=persist_directory,
                 settings=Settings(anonymized_telemetry=False)
             )
+            client_time = time.time() - client_start
+            logger.info(f"   ✓ ChromaDB client initialized ({client_time:.3f}s)")
 
+            collection_start = time.time()
             self.collection = self.client.get_or_create_collection(
                 name=collection_name,
                 metadata={"description": "Financial news articles with sentiment"}
             )
+            collection_time = time.time() - collection_start
+
+            # Get collection stats
+            collection_count = self.collection.count()
+            logger.info(f"   ✓ Collection '{collection_name}' ready ({collection_time:.3f}s)")
+            logger.info(f"   📊 Collection contains {collection_count} documents")
+
+            init_time = time.time() - init_start
+            logger.info(f"✅ ChromaDB initialized successfully ({init_time:.3f}s)")
 
         except Exception as e:
+            logger.error(f"❌ Failed to initialize ChromaDB: {e}")
             raise RuntimeError(f"Failed to initialize ChromaDB: {e}") from e
 
     def add_news_articles(
@@ -62,6 +85,9 @@ class NewsVectorStore:
         """
         if not articles:
             raise ValueError("Articles list cannot be empty")
+
+        logger.info(f"📝 [ChromaDB] Adding {len(articles)} articles for {ticker}")
+        add_start = time.time()
 
         try:
             documents = []
@@ -97,16 +123,36 @@ class NewsVectorStore:
                 article_id = f"{ticker}_{timestamp_str}_{i}"
                 ids.append(article_id)
 
-            # Add to collection
+            # Log sample article
+            if articles:
+                sample = articles[0]
+                logger.debug(f"   Sample article:")
+                logger.debug(f"      Title: {sample.get('title', 'N/A')[:60]}...")
+                logger.debug(f"      Source: {sample.get('source', 'N/A')}")
+                logger.debug(f"      Sentiment: {sample.get('sentiment', 'N/A')} ({sample.get('sentiment_score', 0):.2f})")
+
+            # Add to collection with timing
+            embed_start = time.time()
             self.collection.add(
                 documents=documents,
                 metadatas=metadatas,
                 ids=ids
             )
+            embed_time = time.time() - embed_start
+
+            total_time = time.time() - add_start
+            collection_count = self.collection.count()
+
+            logger.info(
+                f"✅ [ChromaDB] Added {len(articles)} articles for {ticker} | "
+                f"Embedding: {embed_time:.3f}s | Total: {total_time:.3f}s | "
+                f"Collection size: {collection_count}"
+            )
 
             return len(articles)
 
         except Exception as e:
+            logger.error(f"❌ [ChromaDB] Failed to add articles for {ticker}: {e}")
             raise RuntimeError(f"Failed to add articles to vector store: {e}") from e
 
     def search_similar_news(
@@ -130,6 +176,13 @@ class NewsVectorStore:
         Raises:
             RuntimeError: If search fails
         """
+        logger.info(f"🔍 [ChromaDB] Searching for similar news")
+        logger.info(f"   Query: {query[:100]}{'...' if len(query) > 100 else ''}")
+        logger.info(f"   Ticker filter: {ticker or 'None'}")
+        logger.info(f"   Sentiment filter: {sentiment_filter or 'None'}")
+        logger.info(f"   Max results: {n_results}")
+        search_start = time.time()
+
         try:
             # Build where filter
             where = {}
@@ -138,12 +191,14 @@ class NewsVectorStore:
             if sentiment_filter:
                 where["sentiment"] = sentiment_filter
 
-            # Query vector store
+            # Query vector store with timing
+            query_start = time.time()
             results = self.collection.query(
                 query_texts=[query],
                 n_results=n_results,
                 where=where if where else None
             )
+            query_time = time.time() - query_start
 
             # Format results
             similar_articles = []
@@ -151,6 +206,7 @@ class NewsVectorStore:
                 for i, doc in enumerate(results["documents"][0]):
                     metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                     distance = results["distances"][0][i] if results["distances"] else 0.0
+                    similarity = 1.0 - float(distance)
 
                     similar_articles.append({
                         "content": doc,
@@ -161,12 +217,24 @@ class NewsVectorStore:
                         "sentiment": metadata.get("sentiment", "neutral"),
                         "sentiment_score": metadata.get("sentiment_score", 0.0),
                         "distance": float(distance),
-                        "similarity": 1.0 - float(distance)  # Convert distance to similarity
+                        "similarity": similarity
                     })
+
+                    logger.debug(
+                        f"      Result {i+1}: similarity={similarity:.3f} | "
+                        f"title={metadata.get('title', 'N/A')[:50]}..."
+                    )
+
+            total_time = time.time() - search_start
+            logger.info(
+                f"✅ [ChromaDB] Search complete: {len(similar_articles)} results | "
+                f"Query: {query_time:.3f}s | Total: {total_time:.3f}s"
+            )
 
             return similar_articles
 
         except Exception as e:
+            logger.error(f"❌ [ChromaDB] Search failed: {e}")
             raise RuntimeError(f"Failed to search vector store: {e}") from e
 
     def get_ticker_statistics(self, ticker: str) -> Dict[str, Any]:
@@ -181,13 +249,19 @@ class NewsVectorStore:
         Raises:
             RuntimeError: If statistics retrieval fails
         """
+        logger.info(f"📊 [ChromaDB] Retrieving statistics for {ticker}")
+        stats_start = time.time()
+
         try:
-            # Get all articles for ticker
+            # Get all articles for ticker with timing
+            get_start = time.time()
             results = self.collection.get(
                 where={"ticker": ticker}
             )
+            get_time = time.time() - get_start
 
             if not results["metadatas"]:
+                logger.info(f"   ℹ️  No articles found for {ticker}")
                 return {
                     "ticker": ticker,
                     "total_articles": 0,
@@ -211,6 +285,14 @@ class NewsVectorStore:
 
             avg_score = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0.0
 
+            total_time = time.time() - stats_start
+            logger.info(
+                f"✅ [ChromaDB] Statistics for {ticker}: "
+                f"{total} articles | Avg sentiment: {avg_score:+.3f} | "
+                f"Distribution: pos={sentiment_counts['positive']} neu={sentiment_counts['neutral']} neg={sentiment_counts['negative']} | "
+                f"Time: {total_time:.3f}s"
+            )
+
             return {
                 "ticker": ticker,
                 "total_articles": total,
@@ -219,6 +301,7 @@ class NewsVectorStore:
             }
 
         except Exception as e:
+            logger.error(f"❌ [ChromaDB] Failed to get statistics for {ticker}: {e}")
             raise RuntimeError(f"Failed to get ticker statistics: {e}") from e
 
     def delete_old_articles(self, days: int = 30) -> int:
