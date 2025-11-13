@@ -1,319 +1,306 @@
-# FreshStart MVP - Research-Enhanced Training Guide
+# Model Training Guide
+
+This guide explains how to train the FreshStart prediction models using best practices.
 
 ## Overview
 
-This guide documents the implementation of research-backed enhancements for stock price prediction models based on the paper **"Predicting Next-Day S&P 500 Stock Movements: Best ML/DL Models"**.
+The training scripts have been split into individual files for each model, following ML engineering best practices:
 
-**Research Source**: `docs/research/Predicting Next-Day S&P 500 Stock Movements_ Best ML_DL Models.pdf`
-
-## Training Time Budget
-
-**Total: 11-13 hours** across all models, GridSearch, and hyperparameter tuning
-
-**Allocation**:
-- XGBoost + GridSearchCV: ~4.5 hours (highest priority per research)
-- LSTM (Enhanced): ~3.5 hours
-- GRU (Enhanced): ~2.5 hours
-- Data Preprocessing: ~30 minutes
-
-## Research-Backed Enhancements Implemented
-
-### 1. Feature Engineering (Research-Critical)
-
-**Research Finding**: Feature quality matters more than model complexity. Well-engineered features with XGBoost match or beat deep neural networks.
-
-**Implemented Features** (based on research recommendations):
-
-#### Lagged Returns (Multi-Scale Momentum)
-- `returns_1d`: 1-day return
-- `returns_5d`: 5-day return
-- `returns_10d`: 10-day return
-- `returns_20d`: 20-day return
-- `returns_60d`: 60-day return
-- `returns_252d`: Annual return
-
-**Research Citation**: "Form feature vectors of 13 lagged relative returns (1-day, 5-day, 10-day, ... up to 1-year)"
-
-#### Technical Indicators
-**RSI (Relative Strength Index)**
-- 14-day RSI standard
-- Research shows RSI is top-3 most important feature
-
-**MACD (Moving Average Convergence Divergence)**
-- MACD line, signal line, and MACD diff
-- Critical for detecting momentum shifts
-
-**Bollinger Bands**
-- Band width (volatility measure)
-- Band position (price position relative to bands)
-- Research: "Bollinger Bands capture volatility regime changes"
-
-#### Extended Moving Averages
-- SMA 5, 10, 20, 50, 200-day
-- 5/20 crossover signal
-- 50/200 crossover signal (Golden/Death Cross)
-
-**Research Citation**: "50 and 200-day moving averages are critical for long-term trend detection"
-
-#### Volatility Measures
-- 10-day, 20-day, 60-day rolling volatility
-- Research: "Volatility regime can change model behavior; excluding high-volatility stocks from trading can hurt Sharpe ratio despite prediction accuracy"
-
-#### Volume Features
-- Volume ratio (current vs 10-day MA)
-- Volume trend (10-day vs 20-day MA)
-
-**Files Modified**:
-- `data/preprocess_data.py`: `engineer_features()` method
-- `models/prediction/lstm_model.py`: `_prepare_features()` method
-- `models/prediction/gru_model.py`: `_prepare_features()` method
-- `models/prediction/gradient_boost_model.py`: `_extract_features()` method
-
----
-
-### 2. Sequence Length: 30 → 60 Days
-
-**Research Finding**: "60-day lookback window is optimal for capturing both short-term patterns and longer-term trends"
-
-**Implementation**:
-- Changed default `sequence_length` from 30 to 60 in `preprocess_data.py`
-- LSTM/GRU models now use 60-timestep sequences
-- Better temporal pattern capture
-
-**Research Citation**: "A typical preprocessing step is to create a fixed-length window of recent daily returns as the input sequence (for example, the past 60 trading days)"
-
-**Files Modified**:
-- `data/preprocess_data.py`: `create_sequences()` default changed to 60
-- `models/prediction/lstm_model.py`: Uses 60-day sequences
-- `models/prediction/gru_model.py`: Uses 60-day sequences
-
----
-
-### 3. Enhanced LSTM Architecture
-
-**Research Finding**: "LSTM achieved ~52-53% directional accuracy and Sharpe ~5.8, significantly outperforming memory-free models"
-
-**Baseline Architecture** (Original):
 ```
-LSTM(64) → Dropout(0.2) → LSTM(32) → Dropout(0.2) → Dense(16) → Dense(3)
+models/prediction/
+├── train_lstm.py          # LSTM model training
+├── train_gru.py           # GRU model training
+├── train_xgboost.py       # XGBoost model training
+├── train_all_models.py    # Master script to train all models
+└── TRAINING_GUIDE.md      # This file
 ```
 
-**Enhanced Architecture** (Research-Based):
-```
-LSTM(128) → BatchNorm → Dropout(0.3) →
-LSTM(64) → BatchNorm → Dropout(0.3) →
-LSTM(32) → BatchNorm → Dropout(0.2) →
-Dense(16) → Dropout(0.2) → Dense(3)
-```
+## Benefits of This Structure
 
-**Key Improvements**:
-1. **Deeper network**: 3 LSTM layers instead of 2
-2. **More units**: 128 → 64 → 32 (captures more complex patterns)
-3. **Batch Normalization**: Training stability
-4. **Learning rate schedule**: Exponential decay for better convergence
-5. **Early stopping**: Patience=5, prevents overfitting
-6. **Model checkpointing**: Saves best model based on val_accuracy
-7. **ReduceLROnPlateau**: Adaptive learning rate
+✅ **Memory Efficiency** - Train one model at a time with proper cleanup
+✅ **Better Organization** - Each model has its own configuration
+✅ **Easier Debugging** - Isolate issues to specific models
+✅ **Flexibility** - Train only the models you need
+✅ **Proper Checkpointing** - Save best models with hyperparameters
+✅ **Early Stopping** - Prevent overfitting automatically
+✅ **Comprehensive Metrics** - Financial metrics + ML metrics
 
-**Research Citation**: "A 3-layer LSTM with a few hundred units can be trained on years of daily data in minutes to hours – within the 12h constraint"
+## Quick Start
 
-**Training Time**: ~3.5 hours (with early stopping)
+### Train All Models
 
-**Files Modified**:
-- `models/prediction/train_models.py`: `train_lstm_model()` function
-
----
-
-### 4. Enhanced GRU Architecture
-
-**Research Finding**: "GRU is faster than LSTM while maintaining similar performance, effective at capturing recent trends"
-
-**Enhanced Architecture** (Same as LSTM but with GRU layers):
-```
-GRU(128) → BatchNorm → Dropout(0.3) →
-GRU(64) → BatchNorm → Dropout(0.3) →
-GRU(32) → BatchNorm → Dropout(0.2) →
-Dense(16) → Dropout(0.2) → Dense(3)
+```bash
+# Train all three models sequentially
+python -m models.prediction.train_all_models
 ```
 
-**Advantages over LSTM**:
-- Faster training (fewer parameters)
-- Good for capturing recent trends
-- Lower memory footprint
+### Train Individual Models
 
-**Training Time**: ~2.5 hours (faster than LSTM)
+```bash
+# Train only LSTM
+python -m models.prediction.train_lstm
 
-**Files Modified**:
-- `models/prediction/train_models.py`: `train_gru_model()` function
+# Train only GRU
+python -m models.prediction.train_gru
 
----
-
-### 5. XGBoost with GridSearchCV
-
-**Research Finding**: "XGBoost is a top performer (51-52% accuracy baseline, up to 60-65% with proper hyperparameter tuning)"
-
-**Baseline**: Fixed hyperparameters
-**Enhanced**: Comprehensive GridSearchCV
-
-**Hyperparameter Search Space**:
-```python
-param_grid = {
-    'n_estimators': [100, 200, 300],
-    'max_depth': [3, 5, 7, 9],
-    'learning_rate': [0.01, 0.05, 0.1],
-    'subsample': [0.8, 0.9, 1.0],
-    'colsample_bytree': [0.8, 0.9, 1.0],
-    'min_child_weight': [1, 3, 5],
-    'gamma': [0, 0.1, 0.2]
-}
+# Train only XGBoost
+python -m models.prediction.train_xgboost
 ```
 
-**Total Combinations**: 3 × 4 × 3 × 3 × 3 × 3 × 3 = **2,916 combinations** with 3-fold CV
+### Train Specific Models
 
-**Features**:
+```bash
+# Train only LSTM and GRU
+python -m models.prediction.train_all_models --models lstm gru
+
+# Train only XGBoost (skip grid search for faster training)
+python -m models.prediction.train_xgboost --no-gridsearch
+```
+
+## Features
+
+### 1. Automatic Best Model Checkpointing
+
+Each training script automatically saves:
+- **Best model** (based on validation accuracy)
+- **Training history** (CSV format)
+- **Hyperparameters** (JSON format)
+- **Training metrics** (accuracy, loss, confusion matrix)
+- **Financial metrics** (expected value, win rate, payoff ratio)
+
+### 2. Early Stopping
+
+Prevents overfitting by:
+- Monitoring validation loss
+- Stopping after 5 epochs without improvement
+- Restoring best weights automatically
+
+### 3. Learning Rate Scheduling
+
+LSTM and GRU use Cosine Decay with Restarts:
+- Starts high for fast initial learning
+- Gradually decreases for fine-tuning
+- Periodic restarts to escape local minima
+
+### 4. Memory Management
+
+The master script (`train_all_models.py`) includes:
+- Keras session cleanup between models
+- Garbage collection forcing
+- Error handling to prevent crashes
+
+### 5. Hyperparameter Tuning
+
+**LSTM/GRU:** Default hyperparameters optimized from research
+- 3-layer architecture (128 → 64 → 32 units)
+- 30% dropout for regularization
+- Batch normalization between layers
+
+**XGBoost:** Optional GridSearchCV
 - 3-fold cross-validation
-- Parallel processing (`n_jobs=-1`)
-- `tree_method='hist'` for faster training
-- Feature importance analysis (top 15 features logged)
+- Tests 200+ parameter combinations
+- Automatically selects best parameters
 
-**Research Citation**: "XGBoost with proper hyperparameter tuning can achieve 60-65% accuracy"
+## Output Files
 
-**Training Time**: ~4.5 hours (with GridSearch) or ~1 hour (without GridSearch)
-
-**Files Modified**:
-- `models/prediction/train_models.py`: `train_gradient_boost_model()` function
-
----
-
-## Expected Performance Benchmarks
-
-Based on research findings and academic benchmarks:
-
-### LSTM
-- **Directional Accuracy**: 52-53% (research benchmark)
-- **Sharpe Ratio**: ~5.8 (before transaction costs)
-- **Daily Return**: ~0.46% (research: Fischer & Krauss 2018)
-
-### XGBoost (with GridSearch)
-- **Accuracy**: 60-65% (with proper features + tuning)
-- **Baseline**: 51-52% (without tuning)
-
-### Ensemble (All 3 Models)
-- **Expected**: ~53-55% accuracy
-- **Research**: "Ensemble of RF, boosted trees, and neural net outperformed any single model"
-
-### Key Metrics to Track
-1. **Accuracy** (per class: down/neutral/up)
-2. **Precision** (minimize false positives)
-3. **Recall** (capture true signals)
-4. **F1-Score** (balanced metric)
-5. **Classification Report** (per-class breakdown)
-
----
-
-## Training Pipeline
-
-### Step 1: Download Data
-```bash
-python -m data.download_kaggle_data
-```
-
-**Note**: Requires Kaggle API credentials (`~/.kaggle/kaggle.json`)
-
-### Step 2: Preprocess Data
-```bash
-python -m data.preprocess_data
-```
-
-**Output**: `data/processed/training_splits.npz`
-
-**Features Generated**:
-- LSTM/GRU: 25 features × 60 timesteps
-- XGBoost: 28 features (tabular)
-
-### Step 3: Train All Models
-```bash
-python -m models.prediction.train_models
-```
-
-**This will**:
-1. Train LSTM (3.5 hours)
-2. Train GRU (2.5 hours)
-3. Train XGBoost with GridSearch (4.5 hours)
-4. Generate `training_report.txt`
-
-**Total Time**: ~11 hours
-
----
-
-## Model Files Structure
+After training, each model saves:
 
 ```
 models/prediction/saved_models/
 ├── lstm/
-│   ├── lstm_model.keras           # Final trained model
-│   └── checkpoint.keras            # Best checkpoint
+│   ├── best_model.keras           # Best LSTM model
+│   ├── training_history.csv       # Training metrics per epoch
+│   └── training_results.json      # Full results + hyperparameters
 ├── gru/
-│   ├── gru_model.keras
-│   └── checkpoint.keras
-└── gradient_boost/
-    ├── gb_model.json               # XGBoost native format
-    └── gb_model.pkl                # Pickle format (compatibility)
+│   ├── best_model.keras           # Best GRU model
+│   ├── training_history.csv       # Training metrics per epoch
+│   └── training_results.json      # Full results + hyperparameters
+└── xgboost/
+    ├── best_model.json            # Best XGBoost model (JSON format)
+    ├── best_model.pkl             # Best XGBoost model (Pickle format)
+    └── training_results.json      # Full results + hyperparameters
 ```
 
----
+Combined report:
+```
+models/prediction/training_report.txt  # Comparison of all models
+```
 
-## Research Citations
+## Training Results Structure
 
-### Primary Research Paper
-- **Title**: "Predicting Next-Day S&P 500 Stock Movements: Best ML/DL Models"
-- **Location**: `docs/research/Predicting Next-Day S&P 500 Stock Movements_ Best ML_DL Models.pdf`
+Each `training_results.json` contains:
 
-### Key Studies Referenced
-1. **Fischer & Krauss (2018)**: LSTM on S&P 500 (1992-2015), 52-53% accuracy, Sharpe ~5.8
-2. **Htun et al. (2024)**: LSTM vs RF vs SVM on S&P 500 (2017-2022), LSTM best performer
-3. **FinBERT Study (2024)**: FinBERT sentiment improved AUC by 12.6%, P&L by 26%
-4. **Kaggle Two Sigma (2019)**: ExtraTrees ensemble, focus on risk control
+```json
+{
+  "hyperparameters": {
+    "units_layer1": 128,
+    "dropout_rate": 0.3,
+    ...
+  },
+  "training_time_hours": 1.5,
+  "epochs_completed": 23,
+  "train_accuracy": 0.4123,
+  "val_accuracy": 0.4067,
+  "classification_report": {...},
+  "confusion_matrix": [[...], [...], [...]],
+  "financial_metrics": {
+    "expected_value_per_trade": 0.0234,
+    "win_rate": 48.52,
+    "payoff_asymmetry": 1.23,
+    "total_trades": 43521
+  }
+}
+```
 
----
+## Financial Metrics Explained
+
+These metrics evaluate profitability of a simulated trading strategy:
+
+- **Expected Value/Trade**: Average profit per trade (%)
+  - Positive = profitable strategy
+  - Negative = losing strategy
+
+- **Win Rate**: Percentage of profitable trades
+  - Target: >50% for simple strategies
+
+- **Payoff Asymmetry**: Avg profit / Avg loss ratio
+  - >1.0 = winners bigger than losers (good!)
+  - <1.0 = losers bigger than winners (bad)
+
+- **Total Trades**: Number of trades executed
+  - More trades = more statistical confidence
+
+## Customizing Hyperparameters
+
+### LSTM/GRU
+
+Edit hyperparameters in the training call:
+
+```python
+from models.prediction.train_lstm import train_lstm_model
+
+hyperparameters = {
+    'units_layer1': 256,      # Increase model capacity
+    'units_layer2': 128,
+    'units_layer3': 64,
+    'dropout_rate': 0.4,      # More regularization
+    'learning_rate': 0.0005,  # Slower learning
+    'batch_size': 32,         # Smaller batches
+    'max_epochs': 200,        # More training
+    'early_stopping_patience': 10
+}
+
+results = train_lstm_model(
+    X_train, y_train,
+    X_val, y_val,
+    hyperparameters=hyperparameters
+)
+```
+
+### XGBoost
+
+Edit the parameter grid in `train_xgboost.py`:
+
+```python
+param_grid = {
+    'n_estimators': [100, 200, 300, 500],  # Add more options
+    'max_depth': [3, 5, 7, 10],
+    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+    ...
+}
+```
+
+Or provide custom hyperparameters without grid search:
+
+```python
+hyperparameters = {
+    'n_estimators': 300,
+    'max_depth': 7,
+    'learning_rate': 0.05,
+    ...
+}
+
+results = train_xgboost_model(
+    X_train, y_train,
+    X_val, y_val,
+    use_gridsearch=False,
+    hyperparameters=hyperparameters
+)
+```
 
 ## Troubleshooting
 
-### Issue: "Not enough data"
-**Solution**: Ensure you have at least 260 days of data (60 sequence + 200 for SMA_200)
+### Out of Memory (OOM)
 
-### Issue: GridSearch taking too long
-**Solution**: Set `use_gridsearch=False` in `train_gradient_boost_model()`
+If training gets killed:
 
-### Issue: Out of memory
-**Solution**: Reduce `batch_size` in LSTM/GRU training or reduce `max_stocks` in preprocessing
+1. **Train models individually** (not all at once)
+2. **Reduce batch size** in hyperparameters
+3. **Reduce dataset size** in preprocessing
+4. **Close other programs** to free RAM
 
-### Issue: Poor accuracy
-**Check**:
-1. Data quality (sufficient history?)
-2. Feature engineering (all features calculated?)
-3. Hyperparameters (GridSearch completed?)
-4. Class imbalance (check target distribution)
+### Training Too Slow
 
----
+1. **Skip XGBoost grid search**: Use `--no-gridsearch`
+2. **Reduce max_epochs**: Set lower in hyperparameters
+3. **Use GPU**: Ensure CUDA is available for Keras models
+4. **Reduce dataset**: Process fewer stocks in preprocessing
 
-## Next Steps After Training
+### Models Not Improving
 
-1. **Evaluate on test set**: Load models and evaluate on held-out test data
-2. **Backtest**: Simulate trading strategy with transaction costs
-3. **Monitor performance**: Track accuracy degradation over time (regime changes)
-4. **Retrain periodically**: Models need updates as market patterns change
+1. **Check data quality**: Ensure preprocessing completed correctly
+2. **Adjust learning rate**: Try lower/higher values
+3. **Increase model capacity**: More units in layers
+4. **Decrease regularization**: Lower dropout rate
+5. **More epochs**: Increase max_epochs
 
----
+## Best Practices Checklist
 
-## Contact
+✅ Always train on preprocessed data first: `python -m data.preprocess_data`
+✅ Monitor validation accuracy (not just training accuracy)
+✅ Save best models (done automatically)
+✅ Use early stopping to prevent overfitting
+✅ Evaluate on test set after training (not during)
+✅ Compare multiple models before deployment
+✅ Check financial metrics (not just accuracy)
+✅ Version control hyperparameters and results
 
-For questions about this implementation:
-- Check `docs/team/PAM_CODE_GUIDE.md` for detailed explanations
-- See `ROLE_DIVISION.md` for team responsibilities
+## Next Steps
 
----
+After training:
 
-**Last Updated**: 2025-11-12
-**Implemented By**: Research-enhanced pipeline per PDF recommendations
-**Training Budget**: 11-13 hours total
+1. **Review training report**: `models/prediction/training_report.txt`
+2. **Test on test set**: Create test script
+3. **Compare models**: Choose best based on financial metrics
+4. **Deploy best model**: Use in coordinator workflow
+5. **Monitor performance**: Track real predictions
+
+## Example Workflow
+
+```bash
+# 1. Preprocess data
+python -m data.preprocess_data
+
+# 2. Train all models (takes several hours)
+python -m models.prediction.train_all_models
+
+# 3. Review results
+cat models/prediction/training_report.txt
+
+# 4. If needed, retrain specific model with custom params
+python -m models.prediction.train_lstm  # with custom hyperparameters
+
+# 5. Test on test set
+python -m models.prediction.test_models  # (create this script)
+
+# 6. Deploy best model
+python -m coordinator.workflow
+```
+
+## Support
+
+For issues or questions:
+- Check error messages and tracebacks
+- Review this guide
+- Check training logs in saved_models directories
+- Verify data preprocessing completed successfully

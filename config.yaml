@@ -37,12 +37,12 @@ use_sentiment_ensemble: true
 # Sentiment ensemble strategy: weighted_average, simple_average, voting
 sentiment_ensemble_strategy: weighted_average
 
-# Sentiment model weights
+# Sentiment model weights (lowercase keys required by ensemble code)
 sentiment_model_weights:
-  FinBERT: 0.4    # Best for financial text
-  RoBERTa: 0.3    # Strong general sentiment
-  VADER: 0.2      # Good for social media/informal text
-  TextBlob: 0.1   # Simple baseline
+  finbert: 0.4    # Best for financial text
+  roberta: 0.3    # Strong general sentiment
+  vader: 0.2      # Good for social media/informal text (not yet implemented)
+  textblob: 0.1   # Simple baseline (not yet implemented)
 
 # ============================================================
 # WORKFLOW SETTINGS

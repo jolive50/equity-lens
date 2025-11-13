@@ -32,36 +32,7 @@ interface ResultsDisplayProps {
 }
 
 export default function ResultsDisplay({ result }: ResultsDisplayProps) {
-  const { prediction, sentiment, explanation, reflection, ticker } = result || {}
-
-  // Demo price data for sparkline chart (frontend-only dummy data)
-  const demoPrices = [225, 227, 223, 230, 232, 228, 235, 238]
-
-  // SVG용 좌표 변환
-  // Convert prices to SVG polyline points
-  const createSparklinePoints = (values: number[]): string => {
-    if (!values || values.length === 0) return ''
-
-    const height = 40
-    const padding = 6
-    const widthStep = 100 / (values.length - 1)
-    const max = Math.max(...values)
-    const min = Math.min(...values)
-    const range = max - min || 1 // 0으로 나누기 방지 / avoid division by zero
-
-    return values
-      .map((value, index) => {
-        const x = widthStep * index
-
-        // Larger value -> smaller y (higher on chart)
-        const normalized = (max - value) / range
-        const y = padding + normalized * (height - padding * 2)
-        return `${x.toFixed(1)},${y.toFixed(1)}`
-      })
-      .join(' ')
-  }
-
-  const sparklinePoints = createSparklinePoints(demoPrices)
+  const { prediction, sentiment, explanation, reflection } = result || {}
 
   const hasPrediction = !!prediction && typeof prediction.direction === 'string'
   const hasSentiment = !!sentiment && typeof sentiment.label === 'string'
@@ -91,47 +62,6 @@ export default function ResultsDisplay({ result }: ResultsDisplayProps) {
                   {(prediction!.confidence * 100).toFixed(1)}% confidence
                 </span>
               )}
-            </div>
-
-            {/* Demo mini chart using dummy AAPL-style prices */}
-            <div
-              style={{
-                marginTop: '0.8rem',
-                height: '40px',
-                background:
-                  'linear-gradient(135deg, rgba(56,189,248,0.16), rgba(15,23,42,0.4))',
-                borderRadius: '0.6rem',
-                position: 'relative',
-                overflow: 'hidden',
-                border: '1px solid rgba(148,163,184,0.3)',
-              }}
-            >
-              <svg
-                width="100%"
-                height="40"
-                viewBox="0 0 100 40"
-                preserveAspectRatio="none"
-              >
-                <polyline
-                  points={sparklinePoints}
-                  fill="none"
-                  stroke="#38bdf8"
-                  strokeWidth={2.2}
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 4,
-                  left: 8,
-                  fontSize: '0.7rem',
-                  color: 'var(--muted)',
-                }}
-              >
-                {/* 여기서는 그냥 데모용 텍스트 / Just demo label */}
-                {ticker ? `${ticker} demo trend` : 'Demo price trend'}
-              </div>
             </div>
           </>
         ) : (
