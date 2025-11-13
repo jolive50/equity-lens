@@ -1,54 +1,54 @@
 {
   "model_type": "neural",
-  "test_accuracy": 0.38293263732863353,
+  "test_accuracy": 0.38402503099356516,
   "classification_report": {
     "down": {
       "precision": 0.0,
       "recall": 0.0,
       "f1-score": 0.0,
-      "support": 23479.0
+      "support": 5414.0
     },
     "neutral": {
-      "precision": 0.4032477546947292,
-      "recall": 0.36540753832874345,
-      "f1-score": 0.3833962264150943,
-      "support": 24329.0
+      "precision": 0.4059537353052711,
+      "recall": 0.38991076306683664,
+      "f1-score": 0.39777055271713885,
+      "support": 5491.0
     },
     "up": {
-      "precision": 0.3743664288583287,
-      "recall": 0.7380189283963652,
-      "f1-score": 0.4967514339373636,
-      "support": 26521.0
+      "precision": 0.37411058722674667,
+      "recall": 0.7232350016572754,
+      "f1-score": 0.493135205378835,
+      "support": 6034.0
     },
-    "accuracy": 0.38293263732863353,
+    "accuracy": 0.38402503099356516,
     "macro avg": {
-      "precision": 0.2592047278510193,
-      "recall": 0.36780882224170286,
-      "f1-score": 0.29338255345081926,
-      "support": 74329.0
+      "precision": 0.26002144084400597,
+      "recall": 0.3710485882413707,
+      "f1-score": 0.2969685860319913,
+      "support": 16939.0
     },
     "weighted avg": {
-      "precision": 0.26556507801423135,
-      "recall": 0.38293263732863353,
-      "f1-score": 0.30273502363688,
-      "support": 74329.0
+      "precision": 0.26486069094323356,
+      "recall": 0.38402503099356516,
+      "f1-score": 0.30460687964022076,
+      "support": 16939.0
     }
   },
   "confusion_matrix": [
     [
       0,
-      6208,
-      17271
+      1463,
+      3951
     ],
     [
       0,
-      8890,
-      15439
+      2141,
+      3350
     ],
     [
       0,
-      6948,
-      19573
+      1670,
+      4364
     ]
   ],
   "per_class_metrics": {
@@ -56,41 +56,41 @@
       "precision": 0.0,
       "recall": 0.0,
       "f1_score": 0.0,
-      "support": 23479
+      "support": 5414
     },
     "neutral": {
-      "precision": 0.4032477546947292,
-      "recall": 0.36540753832874345,
-      "f1_score": 0.3833962264150943,
-      "support": 24329
+      "precision": 0.4059537353052711,
+      "recall": 0.38991076306683664,
+      "f1_score": 0.39777055271713885,
+      "support": 5491
     },
     "up": {
-      "precision": 0.3743664288583287,
-      "recall": 0.7380189283963652,
-      "f1_score": 0.4967514339373636,
-      "support": 26521
+      "precision": 0.37411058722674667,
+      "recall": 0.7232350016572754,
+      "f1_score": 0.493135205378835,
+      "support": 6034
     }
   },
   "prediction_distribution": {
     "down": 0,
-    "neutral": 22046,
-    "up": 52283
+    "neutral": 5274,
+    "up": 11665
   },
   "true_distribution": {
-    "down": 23479,
-    "neutral": 24329,
-    "up": 26521
+    "down": 5414,
+    "neutral": 5491,
+    "up": 6034
   },
   "financial_metrics": {
-    "expected_value_per_trade": 0.022014804047204635,
-    "avg_profit": 0.5,
-    "avg_loss": 0.5,
-    "payoff_asymmetry": 1.0,
-    "win_rate": 37.436642885832875,
-    "total_trades": 52283,
-    "winning_trades": 19573,
-    "losing_trades": 17271
+    "expected_value_per_trade": 0.04377861453062222,
+    "avg_profit": 1.4536040544819293,
+    "avg_loss": 1.471467028964431,
+    "payoff_asymmetry": 0.9878604317114241,
+    "win_rate": 51.513073296185176,
+    "total_trades": 11665,
+    "winning_trades": 6009,
+    "losing_trades": 5589
   },
-  "total_samples": 74329,
-  "test_loss": 1.0868358612060547
+  "total_samples": 16939,
+  "test_loss": 1.082984209060669
 }
