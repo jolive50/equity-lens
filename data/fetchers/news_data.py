@@ -1,231 +1,291 @@
+"""
+Yahoo Finance news fetcher (yfinance-only) for sentiment preprocessing.
+
+Behavior:
+- Pull up to `max_items` Yahoo Finance articles per ticker (defaults to 25; many tickers return ~10).
+- Best-effort extraction of article body text with fallbacks.
+- Output is normalized for the sentiment pipeline (title/body/word_count present).
+
+Normalized item:
+{
+  "id": <sha1(url|title|time|ticker)>,
+  "ticker": "AAPL",
+  "time_published": "YYYY-MM-DDTHH:MM:SSZ",
+  "source": "reuters",
+  "title": "Headline...",
+  "url": "https://...",
+  "provider": "yfinance",
+  "body": "full text (truncated, if available)",
+  "word_count": 123
+}
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
 import logging
-import os
+import random
+import re
 import time
-from datetime import datetime
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 
-logger = logging.getLogger(__name__)
+# Optional deps
+try:
+    from newspaper import Article as _NPArticle
+    _NEWSPAPER_AVAILABLE = True
+except Exception:
+    _NEWSPAPER_AVAILABLE = False
 
+try:
+    from readability import Document as _ReadabilityDoc
+    _READABILITY_AVAILABLE = True
+except Exception:
+    _READABILITY_AVAILABLE = False
 
-class NewsDataFetcher:
-    """Fetch financial news from Alpha Vantage NEWS_SENTIMENT API."""
+try:
+    from bs4 import BeautifulSoup
+    _BS4_AVAILABLE = True
+except Exception:
+    _BS4_AVAILABLE = False
 
-    def __init__(self, api_key: Optional[str] = None, require_api_key: bool = False):
-        """Initialize news fetcher with API key.
+# yfinance
+try:
+    import yfinance as yf
+    _YF_AVAILABLE = True
+except Exception:
+    _YF_AVAILABLE = False
 
-        Args:
-            api_key: Alpha Vantage API key (defaults to ALPHA_VANTAGE_API_KEY env var)
-            require_api_key: If True, raise when API key is missing
+log = logging.getLogger(__name__)
 
-        Raises:
-            ValueError: If API key not provided
-        """
-        self.api_key = api_key or os.getenv("ALPHA_VANTAGE_API_KEY")
-        self.require_api_key = require_api_key
-        self._api_available = bool(self.api_key)
+# Tunables
+DEFAULT_MAX_YF = 25
+FINAL_CAP = 50
+MAX_BODY_CHARS = 2000
+MIN_BODY_WORDS = 60
 
-        if not self.api_key and require_api_key:
-            raise ValueError("Alpha Vantage API key required")
-        if not self.api_key:
-            logger.warning(
-                "Alpha Vantage API key not configured; NewsDataFetcher will fall back "
-                "to offline sample articles."
-            )
+# ----------------------------- helpers -----------------------------
+def _sha1_id(*parts: str) -> str:
+    h = hashlib.sha1()
+    for p in parts:
+        h.update((p or "").encode("utf-8", errors="ignore"))
+        h.update(b"|")
+    return h.hexdigest()
 
-        self.base_url = "https://www.alphavantage.co/query"
-        self.rate_limit_delay = 12  # Alpha Vantage: 5 calls/min for free tier
-
-    def fetch_news(
-        self,
-        ticker: str,
-        limit: int = 50,
-        time_from: Optional[str] = None,
-        time_to: Optional[str] = None
-    ) -> List[Dict]:
-        """Fetch news articles for a specific ticker.
-
-        Args:
-            ticker: Stock ticker symbol (e.g., "AAPL")
-            limit: Maximum number of articles to return (max 1000)
-            time_from: Start time in YYYYMMDDTHHMM format (optional)
-            time_to: End time in YYYYMMDDTHHMM format (optional)
-
-        Returns:
-            List of article dictionaries with keys: title, content, source, timestamp, url
-
-        Raises:
-            RuntimeError: If API call fails
-        """
-        if not self.api_key:
-            logger.info(f"      📡 DATA FETCHER: Using offline news sample for {ticker}")
-            logger.info(f"         → Reason: API key not configured")
-            articles = self._offline_articles(ticker, limit)
-            logger.info(f"      ✅ DATA FETCHER: Generated {len(articles)} offline sample articles")
-            return articles
-
-        params = {
-            "function": "NEWS_SENTIMENT",
-            "tickers": ticker,
-            "apikey": self.api_key,
-            "limit": min(limit, 1000)  # API max is 1000
-        }
-
-        if time_from:
-            params["time_from"] = time_from
-        if time_to:
-            params["time_to"] = time_to
-
+def _to_iso8601(ts: Optional[str]) -> str:
+    if not ts:
+        return ""
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z"):
         try:
-            logger.info(f"      📡 DATA FETCHER: Fetching news for {ticker}")
-            logger.info(f"         → API: Alpha Vantage NEWS_SENTIMENT")
-            logger.info(f"         → Limit: {params['limit']} articles")
+            dt = datetime.strptime(ts, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            pass
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return ""
 
-            response = requests.get(self.base_url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+def _first_str(*values) -> str:
+    for v in values:
+        if v is None:
+            continue
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if isinstance(v, dict):
+            for k in ("title", "text", "label", "name", "provider", "publisher",
+                      "source", "canonicalUrl", "url", "link", "headline"):
+                s = v.get(k)
+                if isinstance(s, str) and s.strip():
+                    return s.strip()
+        if isinstance(v, (list, tuple)) and v:
+            for s in v:
+                if isinstance(s, str) and s.strip():
+                    return s.strip()
+    return ""
 
-            if "Information" in data:
-                raise RuntimeError(f"API rate limit: {data['Information']}")
+def _normalize_domain(netloc: str) -> str:
+    return re.sub(r"^(www\.|finance\.)", "", netloc or "", flags=re.I).lower()
 
-            if "Error Message" in data:
-                raise RuntimeError(f"API error: {data['Error Message']}")
+def _clean_title(t: str, *, max_len: int = 140) -> str:
+    """Remove stray characters and trim titles nicely."""
+    if not t:
+        return ""
+    t = t.replace("\u00a0", " ")
+    t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"^[\-\–\—\·\•\|]+", "", t)
+    t = t.strip(" -–—·•|")
+    t = t.strip()
+    if t.endswith("?"):  # remove question marks
+        t = t[:-1].strip()
+    return (t[:max_len].rstrip() + "...") if len(t) > max_len else t
 
-            if "feed" not in data:
-                raise RuntimeError(f"Unexpected API response: {data}")
+# ---------------------- body extraction helpers --------------------
+def _looks_like_bot_block(text: str) -> bool:
+    if not text:
+        return False
+    low = text.lower()
+    return any(s in low for s in ["are you a robot", "enable javascript", "access denied"])
 
-            articles = self._parse_articles(data["feed"])
+def _enforce_quality_or_empty(text: str) -> str:
+    if not text or len(text.split()) < MIN_BODY_WORDS:
+        return ""
+    if _looks_like_bot_block(text):
+        return ""
+    return text
 
-            # Log article statistics
-            if articles:
-                sentiments = [a["sentiment"]["label"] for a in articles]
-                pos_count = sentiments.count("Positive")
-                neg_count = sentiments.count("Negative")
-                neu_count = sentiments.count("Neutral")
+def _fetch_html(url: str, *, timeout: int = 15) -> str:
+    if not url:
+        return ""
+    headers = {
+        "User-Agent": random.choice([
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6)",
+        ]),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=timeout)
+        if r.status_code >= 400:
+            return ""
+        return r.text
+    except Exception:
+        return ""
 
-                logger.info(f"      ✅ DATA FETCHER: Successfully fetched {len(articles)} news articles")
-                logger.info(f"         → Sentiment distribution: {pos_count} positive, {neu_count} neutral, {neg_count} negative")
-                logger.info(f"         → Latest article: \"{articles[0]['title'][:50]}...\"")
-                logger.info(f"         → Sources: {len(set(a['source'] for a in articles))} unique sources")
+def _clean_text(txt: str) -> str:
+    """Remove junk lines, whitespace, and HTML residue."""
+    if not txt:
+        return ""
+    txt = txt.replace("\u00a0", " ").strip()
+    junk = ["Read more", "Subscribe", "Sign in", "Advertisement",
+            "All rights reserved", "Cookie", "Privacy Policy"]
+    lines = []
+    for line in txt.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if any(j.lower() in s.lower() for j in junk):
+            continue
+        lines.append(s)
+    txt = " ".join(lines)
+    txt = re.sub(r"\s+", " ", txt)
+    return txt.strip()
 
-            # Rate limiting
-            time.sleep(self.rate_limit_delay)
+# ----------------------------- yfinance -----------------------------
+def _normalize_feed_item_yf(raw: dict, ticker: str) -> dict:
+    title = _first_str(raw.get("title"), (raw.get("content") or {}).get("title"), raw.get("headline"))
+    title = _clean_title(title)
+    url = _first_str(raw.get("link"), raw.get("url"), (raw.get("content") or {}).get("canonicalUrl"))
+    source = _first_str(raw.get("publisher"), raw.get("source"), raw.get("provider")) or "yahoo"
+    t_val = raw.get("providerPublishTime") or raw.get("pubDate") or raw.get("date")
+    time_pub = ""
+    if isinstance(t_val, (int, float)) or (isinstance(t_val, str) and t_val.isdigit()):
+        epoch = int(t_val)
+        if epoch > 10**12:
+            epoch //= 1000
+        time_pub = datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    elif isinstance(t_val, str):
+        time_pub = _to_iso8601(t_val)
+    uid = _sha1_id(url, title, time_pub, ticker)
+    return {
+        "id": uid, "ticker": ticker, "time_published": time_pub,
+        "source": source, "title": title, "url": url, "provider": "yfinance"
+    }
 
-            return articles
+def fetch_yfinance_news(ticker: str, *, max_items: int = DEFAULT_MAX_YF) -> List[Dict]:
+    if not _YF_AVAILABLE:
+        raise RuntimeError("yfinance not installed.")
+    tkr = yf.Ticker(ticker)
+    raw_list = tkr.news or []
+    return [_normalize_feed_item_yf(a, ticker) for a in raw_list[:min(max_items, FINAL_CAP)]]
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"      ❌ DATA FETCHER: Failed to fetch news for {ticker}: {e}")
-            raise RuntimeError(f"Failed to fetch news for {ticker}: {e}") from e
+# -------------------- body enrichment ----------------------
+def enrich_with_body(news_items: List[Dict], *, max_chars: int = MAX_BODY_CHARS) -> List[Dict]:
+    for it in news_items:
+        it["body"] = ""
+        it["word_count"] = 0
+        url = it.get("url")
+        if not url:
+            continue
 
-    def fetch_multiple_tickers(
-        self,
-        tickers: List[str],
-        limit_per_ticker: int = 50
-    ) -> Dict[str, List[Dict]]:
-        """Fetch news for multiple tickers.
+        html = _fetch_html(url)
+        text = ""
 
-        Args:
-            tickers: List of ticker symbols
-            limit_per_ticker: Max articles per ticker
-
-        Returns:
-            Dictionary mapping ticker -> list of articles
-        """
-        results = {}
-        for ticker in tickers:
+        if _NEWSPAPER_AVAILABLE:
             try:
-                articles = self.fetch_news(ticker, limit=limit_per_ticker)
-                results[ticker] = articles
-            except Exception as e:
-                print(f"Warning: Failed to fetch news for {ticker}: {e}")
-                results[ticker] = []
-        return results
+                art = _NPArticle(url)
+                art.download()
+                art.parse()
+                text = art.text or ""
+            except Exception:
+                pass
 
-    def _parse_articles(self, feed: List[Dict]) -> List[Dict]:
-        """Parse raw Alpha Vantage feed into standardized format.
+        if not text and _READABILITY_AVAILABLE and html:
+            try:
+                doc = _ReadabilityDoc(html)
+                soup = BeautifulSoup(doc.summary(), "html.parser")
+                text = " ".join(p.get_text(separator=" ", strip=True) for p in soup.find_all("p"))
+            except Exception:
+                pass
 
-        Args:
-            feed: Raw feed from Alpha Vantage API
+        if not text and _BS4_AVAILABLE and html:
+            try:
+                soup = BeautifulSoup(html, "html.parser")
+                ps = soup.find_all("p")
+                text = " ".join(p.get_text(separator=" ", strip=True) for p in ps)
+            except Exception:
+                pass
 
-        Returns:
-            List of parsed article dictionaries
-        """
-        articles = []
-        for item in feed:
-            article = {
-                "title": item.get("title", ""),
-                "content": item.get("summary", ""),
-                "source": item.get("source", "unknown"),
-                "timestamp": item.get("time_published", datetime.now().isoformat()),
-                "url": item.get("url", ""),
-                "sentiment": {
-                    "label": item.get("overall_sentiment_label", "Neutral"),
-                    "score": float(item.get("overall_sentiment_score", 0.0))
-                },
-                "ticker_sentiment": item.get("ticker_sentiment", [])
-            }
-            articles.append(article)
+        text = _clean_text(text)
+        text = _enforce_quality_or_empty(text)
+        if text:
+            if len(text) > max_chars:
+                text = text[:max_chars].rstrip() + "..."
+            it["body"] = text
+            it["word_count"] = len(text.split())
 
-        return articles
+        time.sleep(0.1)
+    return news_items
 
-    def _offline_articles(self, ticker: str, limit: int) -> List[Dict]:
-        """Return deterministic offline articles when API access is unavailable."""
-        templates = [
-            {
-                "title": "{ticker} extends rally as demand stays resilient",
-                "content": (
-                    "{ticker} shares advanced in extended trading after analysts pointed "
-                    "to resilient demand across core product lines."
-                ),
-                "source": "FreshStart Daily",
-                "sentiment": {"label": "Positive", "score": 0.32},
-            },
-            {
-                "title": "Regulators scrutinize {ticker} ahead of policy update",
-                "content": (
-                    "Regulators signaled fresh scrutiny for {ticker}, though management "
-                    "believes existing compliance investments limit downside risk."
-                ),
-                "source": "MarketWatch",
-                "sentiment": {"label": "Neutral", "score": 0.04},
-            },
-            {
-                "title": "{ticker} suppliers flag mixed signals heading into earnings",
-                "content": (
-                    "Key suppliers reported softer component orders tied to {ticker}, "
-                    "suggesting investors should brace for modest volatility."
-                ),
-                "source": "GlobalWire",
-                "sentiment": {"label": "Negative", "score": -0.21},
-            },
-        ]
+def fetch_news_yf_only(ticker: str, *, max_items: int = DEFAULT_MAX_YF) -> List[Dict]:
+    """Fetch and enrich Yahoo Finance articles for sentiment models."""
+    yf_items = []
+    try:
+        yf_items = fetch_yfinance_news(ticker, max_items=max_items)
+    except Exception as e:
+        log.warning("yfinance fetch failed: %s", e)
+    return enrich_with_body(yf_items, max_chars=MAX_BODY_CHARS)[:min(max_items, FINAL_CAP)]
 
-        if limit <= 0:
-            return []
+# ----------------------------- CLI -----------------------------
+if __name__ == "__main__":
+    import argparse
+    from textwrap import shorten
 
-        articles: List[Dict] = []
-        now = datetime.utcnow()
-        max_items = min(limit, 50)
-        for idx in range(max_items):
-            template = templates[idx % len(templates)]
-            articles.append(
-                {
-                    "title": template["title"].format(ticker=ticker.upper()),
-                    "content": template["content"].format(ticker=ticker.upper()),
-                    "source": template["source"],
-                    "timestamp": (now.isoformat()),
-                    "url": "",
-                    "sentiment": template["sentiment"],
-                    "ticker_sentiment": [
-                        {
-                            "ticker": ticker.upper(),
-                            "relevance_score": "0.75",
-                            "ticker_sentiment_label": template["sentiment"]["label"],
-                            "ticker_sentiment_score": str(template["sentiment"]["score"]),
-                        }
-                    ],
-                }
-            )
+    ap = argparse.ArgumentParser(description="Fetch Yahoo Finance news only.")
+    ap.add_argument("ticker", help="Ticker symbol (e.g., AAPL, MSFT)")
+    ap.add_argument("--max-items", type=int, default=DEFAULT_MAX_YF)
+    ap.add_argument("--print-json", action="store_true")
+    args = ap.parse_args()
 
-        return articles
+    print(f"\nFetching Yahoo Finance news for {args.ticker} (max {args.max_items})\n")
+    items = fetch_news_yf_only(args.ticker, max_items=args.max_items)
+    print(f"Returned: {len(items)} articles\n")
+
+    for i, item in enumerate(items, start=1):
+        src = item.get("source", "yahoo").lower()
+        time_pub = item.get("time_published") or "-"
+        title = shorten(item.get("title") or "", width=70, placeholder="...")
+        print(f"YF {i:02d}. [{src:>8}] {time_pub}  {title}")
+
+    if args.print_json:
+        print("\n--- JSON ---")
+        print(json.dumps(items, indent=2, ensure_ascii=False))
