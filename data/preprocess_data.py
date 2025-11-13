@@ -321,7 +321,7 @@ class DataPreprocessor:
 
     def process_all_stocks(
         self,
-        max_stocks: int = 50,
+        max_stocks: int = None,
         sequence_length: int = 60
     ) -> Dict[str, Any]:
         """Process multiple stocks and combine data (Research-Enhanced).
@@ -329,21 +329,28 @@ class DataPreprocessor:
         Research recommends 60-day sequences for optimal temporal pattern capture.
 
         Args:
-            max_stocks: Maximum number of stocks to process
+            max_stocks: Maximum number of stocks to process (None = all stocks)
             sequence_length: Sequence length for LSTM/GRU (default 60 per research)
 
         Returns:
             Dictionary with processed data
         """
-        logger.info(f"Processing up to {max_stocks} stocks with {sequence_length}-day sequences...")
+        if max_stocks is None:
+            logger.info(f"Processing ALL available stocks with {sequence_length}-day sequences...")
+            logger.warning("⚠️  Training time will be significantly longer (potentially 50+ hours)")
+            logger.warning("⚠️  Ensure sufficient disk space and memory available")
+        else:
+            logger.info(f"Processing up to {max_stocks} stocks with {sequence_length}-day sequences...")
 
         tickers = self._get_available_tickers()
 
         if not tickers:
             raise FileNotFoundError("No stock CSV files found")
 
-        # Limit number of stocks
-        tickers = tickers[:max_stocks]
+        # Limit number of stocks (if max_stocks specified)
+        if max_stocks is not None:
+            tickers = tickers[:max_stocks]
+
         logger.info(f"Processing {len(tickers)} stocks")
 
         X_lstm_all = []
@@ -487,8 +494,9 @@ def main():
     preprocessor = DataPreprocessor()
 
     try:
-        # Process stocks
-        data = preprocessor.process_all_stocks(max_stocks=50, sequence_length=30)
+        # Process stocks (Research-Enhanced: 60-day sequences, all stocks)
+        # WARNING: Processing all stocks significantly increases training time
+        data = preprocessor.process_all_stocks(max_stocks=None, sequence_length=60)
 
         # Create splits
         splits = preprocessor.create_train_val_test_split(data)

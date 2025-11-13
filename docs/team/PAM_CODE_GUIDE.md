@@ -3,14 +3,20 @@
 
 **Team Member**: PAM
 **Responsibility**: Prediction Models, Price Data, Training Pipeline
-**Last Updated**: 2025-01-12
-**Code Analysis Date**: 2025-01-12 (Reflects actual repository state)
+**Last Updated**: 2025-11-12
+**Code Analysis Date**: 2025-11-12 (Updated to use ALL stocks + 60-day sequences)
 
 ---
 
 ## ✅ IMPLEMENTATION STATUS
 
-**ALL COMPONENTS COMPLETE - MODELS NEED TRAINING**
+**ALL COMPONENTS COMPLETE - READY FOR FULL-SCALE TRAINING**
+
+**🆕 RECENT UPDATE (2025-11-12):**
+- ✅ Changed preprocessing to use **ALL available stocks** (previously limited to 50)
+- ✅ Updated sequence length to **60 days** per research recommendations (previously 30 days)
+- ⚠️ **Training time increased**: Now 50+ hours (was ~11-13 hours)
+- ⚠️ **Memory requirements increased**: Ensure sufficient RAM and disk space
 
 | Component | Status | Integration | Notes |
 |-----------|--------|-------------|-------|
@@ -77,7 +83,8 @@ python -m data.preprocess_data
 ```
 
 **What this does:**
-- Loads 50 stocks from the downloaded data
+- Loads **ALL available stocks** from the downloaded data (~500 S&P 500 stocks)
+- Creates **60-day sequences** (research-recommended for optimal temporal pattern capture)
 - Creates features from raw price data:
   - Returns (1-day, 5-day, 10-day)
   - Moving averages (5, 10, 20 days)
@@ -86,6 +93,8 @@ python -m data.preprocess_data
   - Momentum indicators
 - Splits data: 70% train, 15% validation, 15% test
 - Saves to `data/processed/training_splits.npz`
+
+**⚠️ WARNING**: Processing all stocks takes significantly longer than the previous 50-stock limit
 
 ### Step 3: Train Models
 
@@ -232,30 +241,32 @@ df.loc[next_return < -0.01, 'target_multiclass'] = 0  # down (<-1%)
 ##### Sequence Creation for LSTM/GRU
 
 ```python
-X, y = create_sequences(df, sequence_length=30)
-# X shape: (num_samples, 30, 10)
+X, y = create_sequences(df, sequence_length=60)
+# X shape: (num_samples, 60, 10)
 #   - num_samples: number of sequences
-#   - 30: lookback window (30 days)
+#   - 60: lookback window (60 days) - RESEARCH-RECOMMENDED
 #   - 10: number of features
 # y shape: (num_samples,) - class labels (0, 1, 2)
 ```
 
 **How it works:**
-1. Slide a 30-day window over the data
+1. Slide a 60-day window over the data
 2. For each window, extract all 10 features
 3. Label is the next day's direction
 
 **Example:**
 ```
-Days 1-30: features → predict day 31
-Days 2-31: features → predict day 32
+Days 1-60: features → predict day 61
+Days 2-61: features → predict day 62
 ...
 ```
 
-**Why 30 days:**
-- ~6 weeks of trading data
-- Captures medium-term trends
-- Not too long (overfitting) or too short (noisy)
+**Why 60 days (Research-Enhanced):**
+- **Research finding**: "60-day lookback window is optimal for capturing both short-term patterns and longer-term trends"
+- ~3 months of trading data (12 weeks)
+- Captures quarterly business cycles
+- Better temporal pattern recognition than 30-day sequences
+- Recommended by academic research (see TRAINING_GUIDE.md)
 
 ##### Tabular Features for XGBoost
 
@@ -802,24 +813,27 @@ python -m data.preprocess_data
 
 ## Customization
 
-### Train on more stocks
+### Limit number of stocks (for faster training/testing)
 
-Edit `data/preprocess_data.py`:
+**Current default**: Process ALL stocks (max_stocks=None)
+
+If you want to limit for testing or faster training, edit `data/preprocess_data.py`:
 ```python
 data = preprocessor.process_all_stocks(
-    max_stocks=100,  # Default: 50
-    sequence_length=30
+    max_stocks=50,    # Limit to 50 stocks (default: None = all stocks)
+    sequence_length=60
 )
 ```
 
 ### Change sequence length
 
-Edit `data/preprocess_data.py`:
+**Current default**: 60 days (research-recommended)
+
+Edit `data/preprocess_data.py` if you want to test different lengths:
 ```python
-X_lstm, y_lstm = self.create_sequences(
-    df,
-    sequence_length=60,  # Default: 30
-    features=features
+data = preprocessor.process_all_stocks(
+    max_stocks=None,
+    sequence_length=30  # Change from default 60 (not recommended per research)
 )
 ```
 
