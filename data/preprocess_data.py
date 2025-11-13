@@ -213,6 +213,9 @@ class DataPreprocessor:
         df.loc[next_return > 0.005, 'target_multiclass'] = 2  # up (>0.5%)
         df.loc[next_return < -0.005, 'target_multiclass'] = 0  # down (<-0.5%)
 
+        # Save actual return for P&L calculations (model still predicts class only)
+        df['target_return'] = next_return
+
         return df
 
     def create_sequences(
@@ -220,7 +223,7 @@ class DataPreprocessor:
         df: pd.DataFrame,
         sequence_length: int = 60,
         features: List[str] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Create sequences for LSTM/GRU training (Research-Enhanced).
 
         Research shows 60-day lookback window is optimal for capturing
@@ -232,7 +235,7 @@ class DataPreprocessor:
             features: List of feature column names
 
         Returns:
-            (X, y) arrays for training
+            (X, y, returns) arrays for training - X features, y class labels, returns actual next-day returns
         """
         if features is None:
             features = [
@@ -256,29 +259,32 @@ class DataPreprocessor:
             ]
 
         # Remove NaN rows
-        df_clean = df.dropna(subset=features + ['target_multiclass'])
+        df_clean = df.dropna(subset=features + ['target_multiclass', 'target_return'])
 
         if len(df_clean) < sequence_length + 1:
             raise ValueError(f"Not enough data: need {sequence_length + 1}, have {len(df_clean)}")
 
         X_list = []
         y_list = []
+        returns_list = []
 
         for i in range(len(df_clean) - sequence_length):
             # Get sequence
             sequence = df_clean.iloc[i:i + sequence_length][features].values
             target = df_clean.iloc[i + sequence_length]['target_multiclass']
+            actual_return = df_clean.iloc[i + sequence_length]['target_return']
 
             X_list.append(sequence)
             y_list.append(target)
+            returns_list.append(actual_return)
 
-        return np.array(X_list), np.array(y_list)
+        return np.array(X_list), np.array(y_list), np.array(returns_list)
 
     def create_tabular_features(
         self,
         df: pd.DataFrame,
         features: List[str] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Create tabular features for Gradient Boost (Research-Enhanced).
 
         Research shows XGBoost performs best with comprehensive feature set
@@ -289,7 +295,7 @@ class DataPreprocessor:
             features: List of feature column names
 
         Returns:
-            (X, y) arrays for training
+            (X, y, returns) arrays for training - X features, y class labels, returns actual next-day returns
         """
         if features is None:
             features = [
@@ -312,12 +318,13 @@ class DataPreprocessor:
                 'hl_spread', 'hl_spread_ma'
             ]
 
-        df_clean = df.dropna(subset=features + ['target_multiclass'])
+        df_clean = df.dropna(subset=features + ['target_multiclass', 'target_return'])
 
         X = df_clean[features].values
         y = df_clean['target_multiclass'].values
+        returns = df_clean['target_return'].values
 
-        return X, y
+        return X, y, returns
 
     def process_all_stocks(
         self,
@@ -355,8 +362,10 @@ class DataPreprocessor:
 
         X_lstm_all = []
         y_lstm_all = []
+        returns_lstm_all = []
         X_gb_all = []
         y_gb_all = []
+        returns_gb_all = []
 
         successful_stocks = []
 
@@ -366,15 +375,17 @@ class DataPreprocessor:
                 df = self.load_stock_data(ticker)
                 df = self.engineer_features(df)
 
-                # Create LSTM sequences
-                X_lstm, y_lstm = self.create_sequences(df, sequence_length)
+                # Create LSTM sequences (now returns actual returns too)
+                X_lstm, y_lstm, returns_lstm = self.create_sequences(df, sequence_length)
                 X_lstm_all.append(X_lstm)
                 y_lstm_all.append(y_lstm)
+                returns_lstm_all.append(returns_lstm)
 
-                # Create Gradient Boost features
-                X_gb, y_gb = self.create_tabular_features(df)
+                # Create Gradient Boost features (now returns actual returns too)
+                X_gb, y_gb, returns_gb = self.create_tabular_features(df)
                 X_gb_all.append(X_gb)
                 y_gb_all.append(y_gb)
+                returns_gb_all.append(returns_gb)
 
                 successful_stocks.append(ticker)
                 logger.info(f"  ✓ {ticker}: {len(X_lstm)} sequences, {len(X_gb)} samples")
@@ -393,17 +404,21 @@ class DataPreprocessor:
         try:
             X_lstm_combined = np.vstack(X_lstm_all)
             y_lstm_combined = np.concatenate(y_lstm_all)
+            returns_lstm_combined = np.concatenate(returns_lstm_all)
 
             # Free memory
             del X_lstm_all
             del y_lstm_all
+            del returns_lstm_all
 
             X_gb_combined = np.vstack(X_gb_all)
             y_gb_combined = np.concatenate(y_gb_all)
+            returns_gb_combined = np.concatenate(returns_gb_all)
 
             # Free memory
             del X_gb_all
             del y_gb_all
+            del returns_gb_all
 
             import gc
             gc.collect()
@@ -421,8 +436,10 @@ class DataPreprocessor:
         processed_data = {
             'X_lstm': X_lstm_combined,
             'y_lstm': y_lstm_combined,
+            'returns_lstm': returns_lstm_combined,
             'X_gb': X_gb_combined,
             'y_gb': y_gb_combined,
+            'returns_gb': returns_gb_combined,
             'tickers': successful_stocks,
             'sequence_length': sequence_length
         }
@@ -433,8 +450,10 @@ class DataPreprocessor:
             output_file,
             X_lstm=X_lstm_combined,
             y_lstm=y_lstm_combined,
+            returns_lstm=returns_lstm_combined,
             X_gb=X_gb_combined,
             y_gb=y_gb_combined,
+            returns_gb=returns_gb_combined,
             tickers=successful_stocks
         )
 
@@ -460,8 +479,10 @@ class DataPreprocessor:
         """
         X_lstm = data['X_lstm']
         y_lstm = data['y_lstm']
+        returns_lstm = data['returns_lstm']
         X_gb = data['X_gb']
         y_gb = data['y_gb']
+        returns_gb = data['returns_gb']
 
         # Calculate split indices
         n_lstm = len(X_lstm)
@@ -476,18 +497,24 @@ class DataPreprocessor:
             # LSTM/GRU splits
             'X_lstm_train': X_lstm[:train_end_lstm],
             'y_lstm_train': y_lstm[:train_end_lstm],
+            'returns_lstm_train': returns_lstm[:train_end_lstm],
             'X_lstm_val': X_lstm[train_end_lstm:val_end_lstm],
             'y_lstm_val': y_lstm[train_end_lstm:val_end_lstm],
+            'returns_lstm_val': returns_lstm[train_end_lstm:val_end_lstm],
             'X_lstm_test': X_lstm[val_end_lstm:],
             'y_lstm_test': y_lstm[val_end_lstm:],
+            'returns_lstm_test': returns_lstm[val_end_lstm:],
 
             # Gradient Boost splits
             'X_gb_train': X_gb[:train_end_gb],
             'y_gb_train': y_gb[:train_end_gb],
+            'returns_gb_train': returns_gb[:train_end_gb],
             'X_gb_val': X_gb[train_end_gb:val_end_gb],
             'y_gb_val': y_gb[train_end_gb:val_end_gb],
+            'returns_gb_val': returns_gb[train_end_gb:val_end_gb],
             'X_gb_test': X_gb[val_end_gb:],
             'y_gb_test': y_gb[val_end_gb:],
+            'returns_gb_test': returns_gb[val_end_gb:],
         }
 
         logger.info(f"\nData splits:")
