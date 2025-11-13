@@ -140,15 +140,15 @@ class DataPreprocessor:
         df = df.copy()
 
         # Extended lagged returns (research recommendation)
-        df['returns_1d'] = df['close'].pct_change(1)
-        df['returns_5d'] = df['close'].pct_change(5)
-        df['returns_10d'] = df['close'].pct_change(10)
-        df['returns_20d'] = df['close'].pct_change(20)
-        df['returns_60d'] = df['close'].pct_change(60)
+        df['returns_1d'] = df['close'].pct_change(1, fill_method=None)
+        df['returns_5d'] = df['close'].pct_change(5, fill_method=None)
+        df['returns_10d'] = df['close'].pct_change(10, fill_method=None)
+        df['returns_20d'] = df['close'].pct_change(20, fill_method=None)
+        df['returns_60d'] = df['close'].pct_change(60, fill_method=None)
 
         # Long-term momentum (annual)
         if len(df) >= 252:
-            df['returns_252d'] = df['close'].pct_change(252)
+            df['returns_252d'] = df['close'].pct_change(252, fill_method=None)
         else:
             df['returns_252d'] = 0.0
 
@@ -208,7 +208,7 @@ class DataPreprocessor:
         df['target_direction'] = (df['close'].shift(-1) > df['close']).astype(int)
 
         # Multi-class target (±0.5% threshold per research)
-        next_return = df['close'].pct_change(1).shift(-1)
+        next_return = df['close'].pct_change(1, fill_method=None).shift(-1)
         df['target_multiclass'] = 1  # neutral
         df.loc[next_return > 0.005, 'target_multiclass'] = 2  # up (>0.5%)
         df.loc[next_return < -0.005, 'target_multiclass'] = 0  # down (<-0.5%)

@@ -244,15 +244,8 @@ def train_lstm_model(
                 monitor='val_accuracy',
                 save_best_only=True,
                 verbose=1
-            ),
-            # Reduce LR on plateau
-            keras.callbacks.ReduceLROnPlateau(
-                monitor='val_loss',
-                factor=0.5,
-                patience=3,
-                min_lr=1e-6,
-                verbose=1
             )
+            # Note: ReduceLROnPlateau removed because we're using CosineDecayRestarts schedule
         ]
 
         # Train model with time limit
@@ -436,14 +429,8 @@ def train_gru_model(
                 monitor='val_accuracy',
                 save_best_only=True,
                 verbose=1
-            ),
-            keras.callbacks.ReduceLROnPlateau(
-                monitor='val_loss',
-                factor=0.5,
-                patience=3,
-                min_lr=1e-6,
-                verbose=1
             )
+            # Note: ReduceLROnPlateau removed because we're using CosineDecayRestarts schedule
         ]
 
         # Train model
@@ -869,6 +856,9 @@ def save_training_report(metrics: Dict[str, Dict[str, Any]], output_file: str = 
 
 def main():
     """Main training pipeline."""
+    import gc
+    import keras.backend as K
+
     logger.info("=" * 60)
     logger.info("FreshStart - Model Training Pipeline")
     logger.info("=" * 60)
@@ -882,6 +872,9 @@ def main():
 
         # LSTM
         try:
+            logger.info("\n" + "=" * 60)
+            logger.info("Starting LSTM Training")
+            logger.info("=" * 60)
             lstm_metrics = train_lstm_model(
                 data['X_lstm_train'],
                 data['y_lstm_train'],
@@ -889,11 +882,26 @@ def main():
                 data['y_lstm_val']
             )
             metrics['LSTM'] = lstm_metrics
+
+            # Clear Keras session and force garbage collection
+            logger.info("\nCleaning up memory after LSTM training...")
+            K.clear_session()
+            gc.collect()
+            logger.info("Memory cleanup complete.\n")
+
         except Exception as e:
             logger.error(f"LSTM training failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Still clean up memory
+            K.clear_session()
+            gc.collect()
 
         # GRU
         try:
+            logger.info("\n" + "=" * 60)
+            logger.info("Starting GRU Training")
+            logger.info("=" * 60)
             gru_metrics = train_gru_model(
                 data['X_lstm_train'],  # Same data as LSTM
                 data['y_lstm_train'],
@@ -901,11 +909,26 @@ def main():
                 data['y_lstm_val']
             )
             metrics['GRU'] = gru_metrics
+
+            # Clear Keras session and force garbage collection
+            logger.info("\nCleaning up memory after GRU training...")
+            K.clear_session()
+            gc.collect()
+            logger.info("Memory cleanup complete.\n")
+
         except Exception as e:
             logger.error(f"GRU training failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Still clean up memory
+            K.clear_session()
+            gc.collect()
 
         # Gradient Boost
         try:
+            logger.info("\n" + "=" * 60)
+            logger.info("Starting Gradient Boost Training")
+            logger.info("=" * 60)
             gb_metrics = train_gradient_boost_model(
                 data['X_gb_train'],
                 data['y_gb_train'],
@@ -915,6 +938,8 @@ def main():
             metrics['GradientBoost'] = gb_metrics
         except Exception as e:
             logger.error(f"Gradient Boost training failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Save report
         if metrics:
