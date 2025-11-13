@@ -9,12 +9,13 @@ Loads and evaluates any saved model (LSTM, GRU, XGBoost, Ensemble, etc.) with:
 
 Supports:
 - Deep learning models (LSTM, GRU) - Keras .keras files
-- Gradient boosting models (XGBoost, LightGBM) - pickle files
+- Gradient boosting models (XGBoost, LightGBM) - .json, .ubj, or .pkl files
 - Ensemble models (PredictionEnsemble) - pickle files (requires --model-type ensemble)
 - Automatically detects model type from file extension (except ensemble)
 
 Usage:
     python -m models.prediction.evaluate_model --model-path path/to/model.keras
+    python -m models.prediction.evaluate_model --model-path path/to/model.json
     python -m models.prediction.evaluate_model --model-path path/to/model.pkl --model-type xgboost
     python -m models.prediction.evaluate_model --model-path path/to/ensemble.pkl --model-type ensemble
     python -m models.prediction.evaluate_model --model-path path/to/model.keras --visualize
@@ -106,7 +107,7 @@ def load_model(model_path: str, model_type: str = None) -> Tuple[Any, str]:
     if model_type is None:
         if file_extension in ['.keras', '.h5', '.hdf5']:
             model_type = 'neural'
-        elif file_extension in ['.pkl', '.pickle', '.joblib']:
+        elif file_extension in ['.pkl', '.pickle', '.joblib', '.json', '.ubj']:
             model_type = 'xgboost'
         else:
             raise ValueError(
@@ -125,10 +126,19 @@ def load_model(model_path: str, model_type: str = None) -> Tuple[Any, str]:
         model.summary(print_fn=logger.info)
 
     elif model_type in ['xgboost', 'gradient_boost', 'lightgbm', 'catboost']:
-        import pickle
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
-        logger.info(f"  Loaded pickled model ({model_type.upper()})")
+        # Check file format based on extension
+        if file_extension in ['.json', '.ubj']:
+            # XGBoost native format (JSON or Universal Binary JSON)
+            import xgboost as xgb
+            model = xgb.XGBClassifier()
+            model.load_model(model_path)
+            logger.info(f"  Loaded XGBoost model from {file_extension} format")
+        else:
+            # Pickle format
+            import pickle
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+            logger.info(f"  Loaded pickled model ({model_type.upper()})")
 
     elif model_type == 'ensemble':
         import pickle
@@ -636,7 +646,10 @@ Examples:
   # Evaluate LSTM model (auto-detects from .keras extension)
   python -m models.prediction.evaluate_model --model-path models/prediction/saved_models/lstm/best_model.keras
 
-  # Evaluate XGBoost model (auto-detects from .pkl extension)
+  # Evaluate XGBoost model from JSON (auto-detects from .json extension)
+  python -m models.prediction.evaluate_model --model-path models/prediction/saved_models/gradient_boost/gb_model.json
+
+  # Evaluate XGBoost model from pickle (auto-detects from .pkl extension)
   python -m models.prediction.evaluate_model --model-path models/prediction/saved_models/xgboost/model.pkl
 
   # Evaluate ensemble model (must specify model type)
@@ -653,7 +666,7 @@ Examples:
         '--model-path',
         type=str,
         required=True,
-        help='Path to saved model file (.keras for neural networks, .pkl for gradient boosting/ensemble)'
+        help='Path to saved model file (.keras for neural networks, .json/.ubj/.pkl for gradient boosting, .pkl for ensemble)'
     )
     parser.add_argument(
         '--model-type',
