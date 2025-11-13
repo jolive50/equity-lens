@@ -1,6 +1,8 @@
 # FreshStart/models/sentiment/ensemble.py
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import asdict
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -13,11 +15,14 @@ from .base_sentiment import (
     normalize_probs,
     normalized_confidence,
     entropy as _entropy,
+    label5_to_str,
 )
 
 # Fetchers
 from data.fetchers.news_data import fetch_news_yf_only
 from .alpha_vantage_sentiment import fetch_alpha_vantage_news
+
+logger = logging.getLogger("freshstart.sentiment.ensemble")
 
 
 def _soft_vote(model_probs: Dict[str, Dict[str, float]], weights: Dict[str, float]) -> Dict[str, float]:
@@ -136,17 +141,25 @@ class SentimentEnsemble:
 
     # ---- public API
     def predict_one(self, item: Mapping[str, Any]) -> SentimentResult:
+        start_time = time.time()
         provider = (item.get("provider") or "").lower()
+        text_id = item.get("id", "unknown")
+
+        logger.info(f"🎯 [Ensemble] Starting prediction for text_id={text_id}, provider={provider}")
+        logger.debug(f"   Models: {list(self.models.keys())}, Weights: {self.weights}")
 
         # AV path
         if provider == "alpha_vantage":
             av_lab = ((item.get("av_meta") or {}).get("overall_sentiment_label") or "").lower()
             av_score = (item.get("av_meta") or {}).get("overall_sentiment_score")
             av_probs = _av_probs_from_label(av_lab, av_score)
+            logger.info(f"   📊 Alpha Vantage label: {av_lab}, score: {av_score}, probs: {av_probs}")
 
             if self.av_trust_mode == "anchor" or not self.models:
+                logger.info(f"   🔒 Using AV anchor mode (trust_mode={self.av_trust_mode})")
                 mixed = av_probs
             elif self.av_trust_mode == "blend":
+                logger.info(f"   🔀 Blending AV with models (av_weight={self.av_weight})")
                 model_probs, model_conf = self._models_vote(item)
                 w_av = self.av_weight
                 w_md = 1.0 - w_av
@@ -156,20 +169,41 @@ class SentimentEnsemble:
                     "positive": w_av * av_probs["positive"] + w_md * model_probs["positive"],
                 }
                 mixed = normalize_probs(blended)
+                logger.info(f"   ✓ Blended result: {mixed}")
             else:  # "ignore"
+                logger.info(f"   🚫 Ignoring AV, using only models")
                 mixed, model_conf = self._models_vote(item)
         else:
             # YF (or other) path → model vote
+            logger.info(f"   🤖 Using model ensemble voting")
             mixed, model_conf = self._models_vote(item)
 
         # Calibration
-        mixed = _apply_neutral_cap(mixed, self.neutral_cap)
-        mixed = _apply_neg_gate(mixed, self.neg_gate)
+        logger.debug(f"   📐 Pre-calibration probs: {mixed}")
+        if self.neutral_cap is not None:
+            before = mixed.copy()
+            mixed = _apply_neutral_cap(mixed, self.neutral_cap)
+            if mixed != before:
+                logger.debug(f"   ✓ After neutral_cap={self.neutral_cap}: {mixed}")
+        if self.neg_gate is not None:
+            before = mixed.copy()
+            mixed = _apply_neg_gate(mixed, self.neg_gate)
+            if mixed != before:
+                logger.debug(f"   ✓ After neg_gate={self.neg_gate}: {mixed}")
         mixed = normalize_probs(mixed)
 
         conf = _conf_from_probs(mixed)
         score = _score_from_probs(mixed)
         ent = _entropy([mixed["negative"], mixed["neutral"], mixed["positive"]])
+        label = self._probs_to_label(mixed)
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"✅ [Ensemble] Result: {label5_to_str(label)} | "
+            f"Score: {score:+.3f} | Conf: {conf:.3f} | "
+            f"Probs: neg={mixed['negative']:.3f} neu={mixed['neutral']:.3f} pos={mixed['positive']:.3f} | "
+            f"Time: {elapsed:.3f}s"
+        )
 
         # Compose result using BaseSentiment-compatible fields
         meta = {
@@ -187,12 +221,12 @@ class SentimentEnsemble:
         }
 
         res = SentimentResult(
-            label=self._probs_to_label(mixed),
+            label=label,
             probs=mixed,
             score=score,
             confidence=conf,
             provider="ensemble",
-            text_id=item.get("id"),
+            text_id=text_id,
             title_used=bool(item.get("title")),
             body_used=bool(item.get("body")),
             tokens=None,
@@ -205,6 +239,7 @@ class SentimentEnsemble:
             strong, mild = self.five_band_thresholds
             fb = _map_five_band(score, strong, mild)
             res.meta["ensemble"]["five_band"] = fb
+            logger.debug(f"   🎚️  Five-band classification: {fb}")
 
         return res
 
@@ -217,32 +252,52 @@ class SentimentEnsemble:
         body = (item.get("body") or "").strip()
         wc = int(item.get("word_count") or 0)
 
+        logger.debug(f"   🗳️  Starting ensemble vote with {len(self.models)} models")
+        logger.debug(f"      Title length: {len(title)}, Body: {len(body)} chars, {wc} words")
+
         probs_by_model: Dict[str, Dict[str, float]] = {}
         conf_by_model: Dict[str, float] = {}
 
         for name, model in self.models.items():
+            model_start = time.time()
             r = model.predict_one(title=title, body=body, text_id=item.get("id"), body_word_count=wc, meta=None)
+            model_time = time.time() - model_start
+
             probs_by_model[name] = r.probs
             conf_by_model[name] = r.confidence
 
+            logger.info(
+                f"      📊 [{name}] Probs: neg={r.probs['negative']:.3f} neu={r.probs['neutral']:.3f} pos={r.probs['positive']:.3f} | "
+                f"Conf: {r.confidence:.3f} | Time: {model_time:.3f}s"
+            )
+
         # entropy-aware weighting (optional)
         weights = dict(self.weights)
+        logger.debug(f"      ⚖️  Static weights: {weights}")
+
         if self.entropy_weighting:
+            logger.debug(f"      📈 Applying entropy-based confidence weighting")
             # multiply each static weight by confidence, then renormalize
             adj = {n: max(0.0, weights.get(n, 0.0)) * max(0.0, min(1.0, conf_by_model.get(n, 0.0)))
                    for n in probs_by_model.keys()}
             s = sum(adj.values()) or 0.0
             if s > 0:
                 weights = {n: v / s for n, v in adj.items()}
+                logger.info(f"      ⚖️  Adjusted weights (conf-weighted): {weights}")
             else:
                 # fallback to static weights of models present
                 present = {n: weights.get(n, 0.0) for n in probs_by_model.keys()}
                 s2 = sum(present.values()) or 1.0
                 weights = {n: v / s2 for n, v in present.items()}
+                logger.warning(f"      ⚠️  Fallback to static weights: {weights}")
 
         mixed = _soft_vote(probs_by_model, weights)
+        logger.info(f"      ✅ Ensemble vote result: {mixed}")
+
         # average confidence just for diagnostics
         avg_conf = sum(conf_by_model.values()) / max(1, len(conf_by_model))
+        logger.debug(f"      📊 Average model confidence: {avg_conf:.3f}")
+
         return mixed, avg_conf
 
     @staticmethod

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
@@ -14,6 +16,7 @@ from data.fetchers.news_data import fetch_news_yf_only
 
 from .base_sentiment import BaseSentiment, normalize_probs
 
+logger = logging.getLogger("freshstart.sentiment.finbert")
 DEFAULT_FINBERT = os.environ.get("FINBERT_MODEL", "ProsusAI/finbert")
 
 
@@ -66,14 +69,28 @@ class FinBertSentiment(BaseSentiment):
     # ---------------- lifecycle ----------------
     def load(self) -> None:
         if self._tokenizer and self._model and self._label_ix2key:
+            logger.debug(f"FinBERT model '{self.model_name}' already loaded")
             return
+
+        logger.info(f"🔄 Loading FinBERT model: {self.model_name}")
+        load_start = time.time()
+
         try:
+            tokenizer_start = time.time()
             self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+            tokenizer_time = time.time() - tokenizer_start
+            logger.info(f"   ✓ Tokenizer loaded ({tokenizer_time:.2f}s)")
+
             # Many checkpoints (e.g., ProsusAI/finbert) are PT-only → load with from_pt=True
+            model_start = time.time()
             self._model = TFAutoModelForSequenceClassification.from_pretrained(
                 self.model_name, from_pt=True
             )
+            model_time = time.time() - model_start
+            logger.info(f"   ✓ Model loaded from PyTorch checkpoint ({model_time:.2f}s)")
+
         except Exception as e:
+            logger.error(f"❌ Failed to load FinBERT model '{self.model_name}': {e}")
             raise RuntimeError(
                 f"Failed to load FinBERT TF model '{self.model_name}'. "
                 "Install: pip install tensorflow tf-keras transformers"
@@ -101,6 +118,15 @@ class FinBertSentiment(BaseSentiment):
             {ix: norm_key(name) for ix, name in ix2name.items()}
             if ix2name
             else {0: "negative", 1: "neutral", 2: "positive"}
+        )
+
+        load_time = time.time() - load_start
+        logger.info(
+            f"✅ FinBERT ready: {self.model_name} | "
+            f"Labels: {self._label_ix2key} | "
+            f"Temperature: {self.temperature} | "
+            f"Prefer positive: {self.prefer_positive} | "
+            f"Total load time: {load_time:.2f}s"
         )
 
     # ---------------- internal helpers ----------------

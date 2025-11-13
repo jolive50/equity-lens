@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import abc
 import json
+import logging
 import math
 import re
+import time
 from dataclasses import dataclass, asdict
 from enum import IntEnum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+
+# Get logger for sentiment models
+logger = logging.getLogger("freshstart.sentiment")
 
 # =========================
 # Types & core structures
@@ -239,12 +244,31 @@ class BaseSentiment(abc.ABC):
         body_word_count: Optional[int] = None,
         meta: Optional[Dict[str, Any]] = None,
     ) -> SentimentResult:
+        start_time = time.time()
         title = (title or "").strip()
         body = (body or "").strip()
 
-        title_probs = self._predict_text(title) if title else {"negative": 0.0, "neutral": 1.0, "positive": 0.0}
-        body_probs  = self._predict_text(body)  if body  else None
+        # Log prediction start
+        logger.debug(f"🔮 [{self.provider}] Predicting sentiment for text_id={text_id}")
+        logger.debug(f"   Title: {title[:80]}{'...' if len(title) > 80 else ''}")
+        if body:
+            logger.debug(f"   Body: {len(body)} chars, {body_word_count or 0} words")
 
+        # Predict title
+        title_start = time.time()
+        title_probs = self._predict_text(title) if title else {"negative": 0.0, "neutral": 1.0, "positive": 0.0}
+        title_time = time.time() - title_start
+        logger.debug(f"   Title prediction: {title_probs} ({title_time:.3f}s)")
+
+        # Predict body
+        body_probs = None
+        if body:
+            body_start = time.time()
+            body_probs = self._predict_text(body)
+            body_time = time.time() - body_start
+            logger.debug(f"   Body prediction: {body_probs} ({body_time:.3f}s)")
+
+        # Mix title and body
         mixed = default_mix(
             title_probs,
             body_probs,
@@ -252,17 +276,33 @@ class BaseSentiment(abc.ABC):
             min_body_words=self.min_body_words,
             body_word_count=body_word_count,
         )
+        logger.debug(f"   Mixed (title+body): {mixed}")
 
         # post-process (neutral cap, negative gate, normalization)
         if self.neutral_cap is not None:
+            before_cap = mixed.copy()
             mixed = cap_neutral(mixed, self.neutral_cap)
+            if mixed != before_cap:
+                logger.debug(f"   After neutral_cap={self.neutral_cap}: {mixed}")
         if self.neg_gate is not None:
+            before_gate = mixed.copy()
             mixed = negative_gate(mixed, threshold=self.neg_gate)
+            if mixed != before_gate:
+                logger.debug(f"   After neg_gate={self.neg_gate}: {mixed}")
         mixed = normalize_probs(mixed)
 
         conf = normalized_confidence([mixed["negative"], mixed["neutral"], mixed["positive"]])
         score = probs_to_score(mixed)
         label5 = self._score_to_label5(score)
+        ent = entropy([mixed["negative"], mixed["neutral"], mixed["positive"]])
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"✅ [{self.provider}] Sentiment: {label5_to_str(label5)} | "
+            f"Score: {score:+.3f} | Conf: {conf:.3f} | "
+            f"Probs: neg={mixed['negative']:.3f} neu={mixed['neutral']:.3f} pos={mixed['positive']:.3f} | "
+            f"Time: {elapsed:.3f}s"
+        )
 
         result = SentimentResult(
             label=label5,
@@ -274,7 +314,7 @@ class BaseSentiment(abc.ABC):
             title_used=bool(title),
             body_used=bool(body),
             tokens=None,
-            entropy=entropy([mixed["negative"], mixed["neutral"], mixed["positive"]]),
+            entropy=ent,
             meta=meta or {},
         )
         return result
