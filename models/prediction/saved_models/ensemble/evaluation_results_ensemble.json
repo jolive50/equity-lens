@@ -1,0 +1,95 @@
+{
+  "model_type": "ensemble",
+  "test_accuracy": 0.318,
+  "classification_report": {
+    "down": {
+      "precision": 0.5714285714285714,
+      "recall": 0.05517241379310345,
+      "f1-score": 0.10062893081761005,
+      "support": 145.0
+    },
+    "neutral": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 202.0
+    },
+    "up": {
+      "precision": 0.31069958847736623,
+      "recall": 0.9869281045751634,
+      "f1-score": 0.4726134585289514,
+      "support": 153.0
+    },
+    "accuracy": 0.318,
+    "macro avg": {
+      "precision": 0.2940427199686459,
+      "recall": 0.347366839456089,
+      "f1-score": 0.1910807964488538,
+      "support": 500.0
+    },
+    "weighted avg": {
+      "precision": 0.26078835978835974,
+      "recall": 0.318,
+      "f1-score": 0.17380210824696604,
+      "support": 500.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      8,
+      0,
+      137
+    ],
+    [
+      4,
+      0,
+      198
+    ],
+    [
+      2,
+      0,
+      151
+    ]
+  ],
+  "per_class_metrics": {
+    "down": {
+      "precision": 0.5714285714285714,
+      "recall": 0.05517241379310345,
+      "f1_score": 0.10062893081761005,
+      "support": 145
+    },
+    "neutral": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "support": 202
+    },
+    "up": {
+      "precision": 0.31069958847736623,
+      "recall": 0.9869281045751634,
+      "f1_score": 0.4726134585289514,
+      "support": 153
+    }
+  },
+  "prediction_distribution": {
+    "down": 14,
+    "neutral": 0,
+    "up": 486
+  },
+  "true_distribution": {
+    "down": 145,
+    "neutral": 202,
+    "up": 153
+  },
+  "financial_metrics": {
+    "expected_value_per_trade": 0.02,
+    "avg_profit": 0.5,
+    "avg_loss": 0.5,
+    "payoff_asymmetry": 1.0,
+    "win_rate": 31.8,
+    "total_trades": 500,
+    "winning_trades": 159,
+    "losing_trades": 139
+  },
+  "total_samples": 500
+}

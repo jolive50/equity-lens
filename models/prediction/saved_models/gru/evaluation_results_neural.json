@@ -1,0 +1,96 @@
+{
+  "model_type": "neural",
+  "test_accuracy": 0.38293263732863353,
+  "classification_report": {
+    "down": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 23479.0
+    },
+    "neutral": {
+      "precision": 0.4032477546947292,
+      "recall": 0.36540753832874345,
+      "f1-score": 0.3833962264150943,
+      "support": 24329.0
+    },
+    "up": {
+      "precision": 0.3743664288583287,
+      "recall": 0.7380189283963652,
+      "f1-score": 0.4967514339373636,
+      "support": 26521.0
+    },
+    "accuracy": 0.38293263732863353,
+    "macro avg": {
+      "precision": 0.2592047278510193,
+      "recall": 0.36780882224170286,
+      "f1-score": 0.29338255345081926,
+      "support": 74329.0
+    },
+    "weighted avg": {
+      "precision": 0.26556507801423135,
+      "recall": 0.38293263732863353,
+      "f1-score": 0.30273502363688,
+      "support": 74329.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      0,
+      6208,
+      17271
+    ],
+    [
+      0,
+      8890,
+      15439
+    ],
+    [
+      0,
+      6948,
+      19573
+    ]
+  ],
+  "per_class_metrics": {
+    "down": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1_score": 0.0,
+      "support": 23479
+    },
+    "neutral": {
+      "precision": 0.4032477546947292,
+      "recall": 0.36540753832874345,
+      "f1_score": 0.3833962264150943,
+      "support": 24329
+    },
+    "up": {
+      "precision": 0.3743664288583287,
+      "recall": 0.7380189283963652,
+      "f1_score": 0.4967514339373636,
+      "support": 26521
+    }
+  },
+  "prediction_distribution": {
+    "down": 0,
+    "neutral": 22046,
+    "up": 52283
+  },
+  "true_distribution": {
+    "down": 23479,
+    "neutral": 24329,
+    "up": 26521
+  },
+  "financial_metrics": {
+    "expected_value_per_trade": 0.022014804047204635,
+    "avg_profit": 0.5,
+    "avg_loss": 0.5,
+    "payoff_asymmetry": 1.0,
+    "win_rate": 37.436642885832875,
+    "total_trades": 52283,
+    "winning_trades": 19573,
+    "losing_trades": 17271
+  },
+  "total_samples": 74329,
+  "test_loss": 1.0868358612060547
+}
