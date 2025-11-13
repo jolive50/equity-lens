@@ -158,8 +158,9 @@ def build_lstm_model(
     Returns:
         Compiled Keras model
     """
-    import keras
-    from keras import layers
+    import tensorflow as tf
+    from tensorflow import keras
+    from tensorflow.keras import layers
 
     model = keras.Sequential([
         # First LSTM layer with return sequences
@@ -231,7 +232,8 @@ def train_lstm_model(
     Returns:
         Dictionary with training results and metrics
     """
-    import keras
+    import tensorflow as tf
+    from tensorflow import keras
 
     logger.info("\n" + "=" * 60)
     logger.info("Training LSTM Model")
@@ -323,13 +325,29 @@ def train_lstm_model(
     logger.info("\nLoading best model...")
     best_model = keras.models.load_model(str(save_path / 'best_model.keras'))
 
-    # Evaluate on all sets
+    # Evaluate on all sets (using batching to avoid OOM)
     logger.info("\nEvaluating on all datasets...")
-    train_loss, train_acc = best_model.evaluate(X_train, y_train, verbose=0)
-    val_loss, val_acc = best_model.evaluate(X_val, y_val, verbose=0)
+    batch_size = hyperparameters['batch_size']
 
-    # Get predictions
-    y_val_pred = np.argmax(best_model.predict(X_val, verbose=0), axis=1)
+    train_loss, train_acc = best_model.evaluate(
+        X_train, y_train,
+        verbose=0,
+        batch_size=batch_size
+    )
+    val_loss, val_acc = best_model.evaluate(
+        X_val, y_val,
+        verbose=0,
+        batch_size=batch_size
+    )
+
+    # Get predictions in batches to avoid OOM
+    logger.info("Generating predictions...")
+    y_val_pred = best_model.predict(
+        X_val,
+        verbose=0,
+        batch_size=batch_size
+    )
+    y_val_pred = np.argmax(y_val_pred, axis=1)
 
     # Classification report
     from sklearn.metrics import classification_report, confusion_matrix

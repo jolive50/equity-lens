@@ -17,6 +17,9 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Tuple
 import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -158,8 +161,6 @@ def build_gru_model(
     Returns:
         Compiled Keras model
     """
-    import keras
-    from keras import layers
 
     model = keras.Sequential([
         # First GRU layer with return sequences
@@ -231,7 +232,6 @@ def train_gru_model(
     Returns:
         Dictionary with training results and metrics
     """
-    import keras
 
     logger.info("\n" + "=" * 60)
     logger.info("Training GRU Model")

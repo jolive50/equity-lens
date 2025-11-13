@@ -857,7 +857,8 @@ def save_training_report(metrics: Dict[str, Dict[str, Any]], output_file: str = 
 def main():
     """Main training pipeline."""
     import gc
-    import keras.backend as K
+    import tensorflow as tf
+    from tensorflow.keras import backend as K
 
     logger.info("=" * 60)
     logger.info("FreshStart - Model Training Pipeline")
