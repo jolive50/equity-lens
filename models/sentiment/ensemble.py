@@ -375,14 +375,14 @@ def _cli() -> None:
 
     # Lazy imports to avoid TF start-up if not needed here
     from .finbert_model import FinBertSentiment
-    from .deberta_model import DebertaSentiment
+    from .deberta_model import DeBertaSentiment
     from .roberta_model import RobertaSentiment
 
     ap = argparse.ArgumentParser(description="Ensemble soft-vote over FinBERT/DeBERTa/RoBERTa + AV handling.")
     ap.add_argument("ticker", help="Ticker symbol, e.g., AAPL")
     ap.add_argument("--max-items-yf", type=int, default=10)
     ap.add_argument("--max-items-av", type=int, default=10)
-    ap.add_argument("--av-trust", choices=["anchor", "blend", "ignore"], default="anchor")
+    ap.add_argument("--av-trust", choices=["anchor", "blend", "ignore"], default="blend")
     ap.add_argument("--av-weight", type=float, default=0.5)
     ap.add_argument("--neutral-cap", type=float, default=None)
     ap.add_argument("--neg-gate", type=float, default=None)
@@ -411,7 +411,7 @@ def _cli() -> None:
     items = av_items + yf_items
 
     finbert = FinBertSentiment()
-    deberta = DebertaSentiment()
+    deberta = DeBertaSentiment()
     roberta = RobertaSentiment()
 
     ens = SentimentEnsemble(
@@ -422,7 +422,7 @@ def _cli() -> None:
         av_weight=args.av_weight,
         neutral_cap=args.neutral_cap,
         neg_gate=args.neg_gate,
-        entropy_weighting=not args.no-entropy-weight,
+        entropy_weighting=not args.no_entropy_weight,
         five_band=args.five_band,
     )
 
