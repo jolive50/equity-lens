@@ -9,12 +9,13 @@ Loads and evaluates any saved model (LSTM, GRU, XGBoost, Ensemble, etc.) with:
 
 Supports:
 - Deep learning models (LSTM, GRU) - Keras .keras files
-- Gradient boosting models (XGBoost, LightGBM) - pickle files
+- Gradient boosting models (XGBoost, LightGBM) - .json, .ubj, or .pkl files
 - Ensemble models (PredictionEnsemble) - pickle files (requires --model-type ensemble)
 - Automatically detects model type from file extension (except ensemble)
 
 Usage:
     python -m models.prediction.evaluate_model --model-path path/to/model.keras
+    python -m models.prediction.evaluate_model --model-path path/to/model.json
     python -m models.prediction.evaluate_model --model-path path/to/model.pkl --model-type xgboost
     python -m models.prediction.evaluate_model --model-path path/to/ensemble.pkl --model-type ensemble
     python -m models.prediction.evaluate_model --model-path path/to/model.keras --visualize
@@ -39,7 +40,7 @@ def load_test_data(data_path: str, model_type: str) -> Dict[str, np.ndarray]:
         model_type: Type of model ('lstm', 'gru', 'xgboost', etc.)
 
     Returns:
-        Dictionary with test data
+        Dictionary with test data (X_test, y_test, returns_test)
     """
     logger.info(f"Loading test data from: {data_path}")
 
@@ -56,6 +57,7 @@ def load_test_data(data_path: str, model_type: str) -> Dict[str, np.ndarray]:
         # Sequential models need 3D data (samples, timesteps, features)
         X_test = data['X_lstm_test']
         y_test = data['y_lstm_test']
+        returns_test = data['returns_lstm_test']
         logger.info(f"  Loaded sequential data for {model_type.upper()} model")
     else:
         # Traditional ML models need 2D data (samples, features)
@@ -63,19 +65,23 @@ def load_test_data(data_path: str, model_type: str) -> Dict[str, np.ndarray]:
         if 'X_xgb_test' in data:
             X_test = data['X_xgb_test']
             y_test = data['y_xgb_test']
+            returns_test = data['returns_xgb_test']
         elif 'X_gb_test' in data:
             X_test = data['X_gb_test']
             y_test = data['y_gb_test']
+            returns_test = data['returns_gb_test']
         else:
             raise KeyError(f"Could not find test data in file. Available keys: {list(data.keys())}")
         logger.info(f"  Loaded tabular data for {model_type.upper()} model")
 
     logger.info(f"  Test set shape: {X_test.shape}")
     logger.info(f"  Test labels shape: {y_test.shape}")
+    logger.info(f"  Test returns shape: {returns_test.shape}")
 
     return {
         'X_test': X_test,
-        'y_test': y_test
+        'y_test': y_test,
+        'returns_test': returns_test
     }
 
 
@@ -101,7 +107,7 @@ def load_model(model_path: str, model_type: str = None) -> Tuple[Any, str]:
     if model_type is None:
         if file_extension in ['.keras', '.h5', '.hdf5']:
             model_type = 'neural'
-        elif file_extension in ['.pkl', '.pickle', '.joblib']:
+        elif file_extension in ['.pkl', '.pickle', '.joblib', '.json', '.ubj']:
             model_type = 'xgboost'
         else:
             raise ValueError(
@@ -120,10 +126,19 @@ def load_model(model_path: str, model_type: str = None) -> Tuple[Any, str]:
         model.summary(print_fn=logger.info)
 
     elif model_type in ['xgboost', 'gradient_boost', 'lightgbm', 'catboost']:
-        import pickle
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
-        logger.info(f"  Loaded pickled model ({model_type.upper()})")
+        # Check file format based on extension
+        if file_extension in ['.json', '.ubj']:
+            # XGBoost native format (JSON or Universal Binary JSON)
+            import xgboost as xgb
+            model = xgb.XGBClassifier()
+            model.load_model(model_path)
+            logger.info(f"  Loaded XGBoost model from {file_extension} format")
+        else:
+            # Pickle format
+            import pickle
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+            logger.info(f"  Loaded pickled model ({model_type.upper()})")
 
     elif model_type == 'ensemble':
         import pickle
@@ -251,8 +266,8 @@ def predict_with_model(model: Any, X_test: np.ndarray, model_type: str, batch_si
     return y_pred
 
 
-def calculate_financial_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-    """Calculate financial evaluation metrics for trading strategy.
+def calculate_financial_metrics(y_true: np.ndarray, y_pred: np.ndarray, actual_returns: np.ndarray) -> Dict[str, float]:
+    """Calculate financial evaluation metrics for trading strategy using actual price returns.
 
     Simulates a simple trading strategy:
     - Predict "up" (class 2): Take long position
@@ -262,33 +277,32 @@ def calculate_financial_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[
     Args:
         y_true: True labels (0=down, 1=neutral, 2=up)
         y_pred: Predicted labels
+        actual_returns: Actual next-day returns (as decimals, e.g., 0.015 = 1.5%)
 
     Returns:
         Dictionary with financial metrics
     """
-    # Map classes to simulated returns (±0.5% per research threshold)
-    class_to_return = {0: -0.5, 1: 0.0, 2: 0.5}
-
     trades = []
     profits = []
     losses = []
 
     for i in range(len(y_true)):
         pred_class = y_pred[i]
-        true_class = y_true[i]
+        actual_return = actual_returns[i]
 
         # Skip neutral predictions (no trade)
         if pred_class == 1:
             continue
 
-        # Actual return based on true class
-        actual_return = class_to_return[true_class]
+        # Skip if actual return is NaN
+        if np.isnan(actual_return):
+            continue
 
         # Trading return (long if pred up, short if pred down)
         if pred_class == 2:  # Predicted up, go long
-            trade_return = actual_return
+            trade_return = actual_return * 100  # Convert to percentage
         elif pred_class == 0:  # Predicted down, go short
-            trade_return = -actual_return
+            trade_return = -actual_return * 100  # Short position profits from decline
         else:
             continue
 
@@ -335,6 +349,7 @@ def evaluate_model(
     X_test: np.ndarray,
     y_test: np.ndarray,
     model_type: str,
+    returns_test: np.ndarray = None,
     batch_size: int = 64,
     save_dir: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -345,6 +360,7 @@ def evaluate_model(
         X_test: Test sequences/features
         y_test: Test labels
         model_type: Type of model
+        returns_test: Actual next-day returns for financial metrics
         batch_size: Batch size for prediction
         save_dir: Optional directory to save evaluation results
 
@@ -405,8 +421,14 @@ def evaluate_model(
         'up': int(np.sum(y_test == 2))
     }
 
-    # Financial metrics
-    financial_metrics = calculate_financial_metrics(y_test, y_pred)
+    # Financial metrics (use actual returns if available, otherwise fall back to simulated)
+    if returns_test is not None:
+        financial_metrics = calculate_financial_metrics(y_test, y_pred, returns_test)
+    else:
+        logger.warning("  No actual returns provided - financial metrics will be less accurate")
+        # Fall back to simulated returns (±0.5% per class)
+        simulated_returns = np.where(y_test == 2, 0.005, np.where(y_test == 0, -0.005, 0.0))
+        financial_metrics = calculate_financial_metrics(y_test, y_pred, simulated_returns)
 
     # Compile results
     results = {
@@ -624,7 +646,10 @@ Examples:
   # Evaluate LSTM model (auto-detects from .keras extension)
   python -m models.prediction.evaluate_model --model-path models/prediction/saved_models/lstm/best_model.keras
 
-  # Evaluate XGBoost model (auto-detects from .pkl extension)
+  # Evaluate XGBoost model from JSON (auto-detects from .json extension)
+  python -m models.prediction.evaluate_model --model-path models/prediction/saved_models/gradient_boost/gb_model.json
+
+  # Evaluate XGBoost model from pickle (auto-detects from .pkl extension)
   python -m models.prediction.evaluate_model --model-path models/prediction/saved_models/xgboost/model.pkl
 
   # Evaluate ensemble model (must specify model type)
@@ -641,7 +666,7 @@ Examples:
         '--model-path',
         type=str,
         required=True,
-        help='Path to saved model file (.keras for neural networks, .pkl for gradient boosting/ensemble)'
+        help='Path to saved model file (.keras for neural networks, .json/.ubj/.pkl for gradient boosting, .pkl for ensemble)'
     )
     parser.add_argument(
         '--model-type',
@@ -695,6 +720,7 @@ Examples:
             data['X_test'],
             data['y_test'],
             model_type,
+            returns_test=data.get('returns_test'),
             batch_size=args.batch_size,
             save_dir=args.save_dir
         )

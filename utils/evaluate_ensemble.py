@@ -311,6 +311,7 @@ def main():
         test_data = load_test_data(args.data_path, 'xgboost')
         X_test = test_data['X_test']
         y_test = test_data['y_test']
+        returns_test = test_data.get('returns_test')
     except FileNotFoundError as e:
         print(f"\nError: {e}")
         print("\nMake sure you have preprocessed data. Run:")
@@ -324,6 +325,7 @@ def main():
         X_test=X_test,
         y_test=y_test,
         model_type='ensemble',
+        returns_test=returns_test,
         batch_size=64,
         save_dir='models/prediction/saved_models/ensemble'
     )
