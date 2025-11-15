@@ -9,7 +9,7 @@ requests==2.31.0
 pandas==2.3.3
 
 # Machine Learning
-numpy==2.3.4
+numpy<2.0,>=1.26.0  # Pin to 1.x for compatibility with PyArrow/pandas
 scikit-learn==1.7.2
 torch==2.8.0
 tensorflow>=2.15.0
