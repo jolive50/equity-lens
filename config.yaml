@@ -7,7 +7,7 @@
 prediction_models:
   - LSTM
   - GRU
-  - GradientBoost
+  - XGBoost
 
 # Enable ensemble mode (combines all prediction models)
 use_ensemble: true
@@ -20,7 +20,7 @@ prediction_ensemble_strategy: weighted_average
 prediction_model_weights:
   LSTM: 0.4              # Strong temporal pattern recognition
   GRU: 0.35              # Good at recent trends
-  GradientBoost: 0.25    # Captures non-linear relationships
+  XGBoost: 0.25          # Optimized gradient boosting (better than sklearn GradientBoost)
 
 # ============================================================
 # SENTIMENT MODELS (Tae's Models)
