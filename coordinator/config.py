@@ -94,7 +94,8 @@ class WorkflowConfig:
                     models.append(LSTMModel())
                 elif model_name == "GRU":
                     models.append(GRUModel())
-                elif model_name == "GradientBoost":
+                elif model_name in ["GradientBoost", "XGBoost"]:
+                    # XGBoost is the preferred name (GradientBoostModel uses XGBoost internally)
                     models.append(GradientBoostModel())
 
             if len(models) >= 2:
@@ -114,7 +115,8 @@ class WorkflowConfig:
             return LSTMModel()
         elif model_name == "GRU":
             return GRUModel()
-        elif model_name == "GradientBoost":
+        elif model_name in ["GradientBoost", "XGBoost"]:
+            # XGBoost is the preferred name (GradientBoostModel uses XGBoost internally)
             return GradientBoostModel()
         else:
             logger.warning(f"Unknown model {model_name}, using LSTM")
@@ -185,7 +187,7 @@ DEFAULT_CONFIG_YAML = """
 prediction_models:
   - LSTM
   - GRU
-  - GradientBoost
+  - XGBoost
 
 # Enable ensemble mode (combines all prediction models)
 use_ensemble: true
@@ -197,7 +199,7 @@ prediction_ensemble_strategy: weighted_average
 prediction_model_weights:
   LSTM: 0.4
   GRU: 0.35
-  GradientBoost: 0.25
+  XGBoost: 0.25
 
 # ============================================================
 # SENTIMENT MODELS (Tae's Models)
