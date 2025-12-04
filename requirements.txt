@@ -18,8 +18,7 @@ xgboost==3.0.0
 
 # Sentiment Analysis
 transformers==4.57.1
-nltk==3.9.2
-textblob==0.15.3
+sentencepiece==0.2.1
 
 # News Article Extraction
 newspaper3k==0.2.8

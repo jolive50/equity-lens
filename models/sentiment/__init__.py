@@ -1,13 +1,14 @@
 """Sentiment analysis models module.
 
-Provides 6 sentiment models + ensemble:
+Supported stack:
 - FinBERT: Financial sentiment (TensorFlow)
 - DeBERTa: Advanced sentiment (PyTorch)
 - RoBERTa: General sentiment (TensorFlow)
 - AlphaVantage: Alpha Vantage API news fetcher
-- VADER: Rule-based sentiment (legacy)
-- TextBlob: Pattern-based sentiment (legacy)
 - SentimentEnsemble: Soft-vote ensemble with 5-class support
+
+Legacy VADER/TextBlob wrappers are intentionally excluded from exports to keep
+the system focused on transformer-based models.
 """
 
 # New 5-class sentiment system
@@ -29,17 +30,6 @@ from .ensemble import SentimentEnsemble
 
 # Alpha Vantage news fetcher
 from .alpha_vantage_sentiment import fetch_alpha_vantage_news
-
-# Legacy models (kept for backward compatibility)
-try:
-    from .vader_model import VADERModel
-except ImportError:
-    VADERModel = None
-
-try:
-    from .textblob_model import TextBlobModel
-except ImportError:
-    TextBlobModel = None
 
 # Compatibility adapter for legacy API
 from .compat import LegacyModelAdapter, LegacySentimentResult
@@ -80,6 +70,4 @@ __all__ = [
     "RoBERTaModel",
     "AlphaVantageSentiment",
     "BaseSentimentModel",
-    "VADERModel",
-    "TextBlobModel",
 ]

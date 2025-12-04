@@ -1,13 +1,13 @@
 """Verification script to test Josh's agents use Tae's real models.
 
 This script verifies:
-1. SentimentAgent loads and uses real sentiment models (FinBERT or VADER)
+1. SentimentAgent loads and uses real sentiment models (FinBERT, RoBERTa, DeBERTa)
 2. Workflow fetches real news data using NewsDataFetcher
 """
 import logging
-import sys
+import traceback
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -19,28 +19,31 @@ def test_sentiment_agent_loads_real_model():
 
     try:
         from agents.sentiment_agent import SentimentAgent
+        from coordinator.config import WorkflowConfig
 
-        # Create agent (should auto-load FinBERT or VADER)
-        agent = SentimentAgent()
+        cfg = WorkflowConfig()
+        model = cfg.get_sentiment_model()
+
+        # Create agent with configured model (decoupled from loading)
+        agent = SentimentAgent(sentiment_model=model)
 
         if agent.sentiment_model is None:
-            logger.error("❌ FAILED: No sentiment model loaded")
+            logger.error("FAILED: No sentiment model loaded")
             return False
 
         model_info = agent.sentiment_model.get_model_info()
-        model_name = model_info['name']
+        model_name = model_info.get("name", "unknown")
 
-        if model_name in ['FinBERT', 'RoBERTa', 'VADER', 'TextBlob', 'AlphaVantage']:
-            logger.info(f"✅ PASSED: Loaded real model: {model_name}")
-            logger.info(f"   Model type: {model_info.get('type', 'unknown')}")
+        if model_name in ["FinBERT", "RoBERTa", "DeBERTa", "AlphaVantage", "SentimentEnsemble"]:
+            logger.info("PASSED: Loaded real model: %s", model_name)
+            logger.info("   Model type: %s", model_info.get("type", "unknown"))
             return True
-        else:
-            logger.error(f"❌ FAILED: Unknown model type: {model_name}")
-            return False
 
-    except Exception as e:
-        logger.error(f"❌ FAILED: {e}")
-        import traceback
+        logger.error("FAILED: Unknown model type: %s", model_name)
+        return False
+
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("FAILED: %s", e)
         traceback.print_exc()
         return False
 
@@ -53,8 +56,11 @@ def test_sentiment_agent_analyzes_with_real_model():
 
     try:
         from agents.sentiment_agent import SentimentAgent
+        from coordinator.config import WorkflowConfig
 
-        agent = SentimentAgent()
+        cfg = WorkflowConfig()
+        model = cfg.get_sentiment_model()
+        agent = SentimentAgent(sentiment_model=model)
 
         # Test with sample news articles
         sample_news = [
@@ -62,34 +68,32 @@ def test_sentiment_agent_analyzes_with_real_model():
                 "title": "Apple reports record quarterly earnings, beats estimates",
                 "content": "Apple Inc. reported better-than-expected earnings...",
                 "source": "Reuters",
-                "timestamp": "2024-11-10T10:00:00Z"
+                "timestamp": "2024-11-10T10:00:00Z",
             },
             {
                 "title": "Tech giant faces regulatory scrutiny over market practices",
                 "content": "Regulators announced an investigation...",
                 "source": "Bloomberg",
-                "timestamp": "2024-11-10T09:00:00Z"
-            }
+                "timestamp": "2024-11-10T09:00:00Z",
+            },
         ]
 
         result = agent.run(ticker="AAPL", news_data=sample_news)
 
-        logger.info(f"✅ Analysis Result:")
-        logger.info(f"   Sentiment: {result.current}")
-        logger.info(f"   Score: {result.score:.2f}")
-        logger.info(f"   Trend: {result.trend}")
-        logger.info(f"   Headlines: {len(result.headlines)}")
+        logger.info("PASSED: Analysis Result:")
+        logger.info("   Sentiment: %s", result.current)
+        logger.info("   Score: %.2f", result.score)
+        logger.info("   Trend: %s", result.trend)
+        logger.info("   Headlines: %d", len(result.headlines))
 
-        # Verify result is not placeholder keyword matching
-        # Real models should produce varied scores, not just 0.3, 0.5, 0.7
+        # Warn if the score looks like a placeholder
         if result.score in [0.3, 0.5, 0.7]:
-            logger.warning("⚠️  WARNING: Score looks like keyword matching placeholder")
+            logger.warning("WARNING: Score looks like keyword matching placeholder")
 
         return True
 
-    except Exception as e:
-        logger.error(f"❌ FAILED: {e}")
-        import traceback
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("FAILED: %s", e)
         traceback.print_exc()
         return False
 
@@ -104,23 +108,18 @@ def test_news_fetcher_integration():
         from data.fetchers.news_data import NewsDataFetcher
 
         fetcher = NewsDataFetcher()
-        logger.info("✅ NewsDataFetcher initialized successfully")
+        logger.info("PASSED: NewsDataFetcher initialized successfully")
 
-        # Note: We won't actually call the API to avoid rate limits
-        # Just verify the fetcher is accessible and has the right methods
-
-        if not hasattr(fetcher, 'fetch_news'):
-            logger.error("❌ FAILED: NewsDataFetcher missing fetch_news method")
+        if not hasattr(fetcher, "fetch_news"):
+            logger.error("FAILED: NewsDataFetcher missing fetch_news method")
             return False
 
-        logger.info("✅ NewsDataFetcher has fetch_news method")
+        logger.info("PASSED: NewsDataFetcher has fetch_news method")
         logger.info("   (Skipping actual API call to preserve rate limits)")
-
         return True
 
-    except Exception as e:
-        logger.error(f"❌ FAILED: {e}")
-        import traceback
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error("FAILED: %s", e)
         traceback.print_exc()
         return False
 
@@ -135,47 +134,43 @@ def verify_no_placeholder_code():
 
     # Check SentimentAgent
     try:
-        with open('agents/sentiment_agent.py', 'r') as f:
-            content = f.read()
+        with open("agents/sentiment_agent.py", "r", encoding="utf-8") as f:
+            content = f.read().lower()
 
-        if 'placeholder' in content.lower():
+        if "placeholder" in content:
             issues.append("SentimentAgent still contains 'placeholder' text")
 
-        if 'keyword-based sentiment' in content.lower():
+        if "keyword-based sentiment" in content:
             issues.append("SentimentAgent still has keyword-based sentiment comment")
 
-        if all(word in content for word in ['beat', 'surge', 'growth', 'profit']):
-            # Check if these are in the context of keyword matching
-            if '["beat", "surge", "growth", "profit"]' in content:
-                issues.append("SentimentAgent still has keyword matching code")
+        if '["beat", "surge", "growth", "profit"]' in content:
+            issues.append("SentimentAgent still has keyword matching code")
 
-    except Exception as e:
+    except Exception as e:  # pragma: no cover - defensive
         issues.append(f"Failed to check sentiment_agent.py: {e}")
 
     # Check workflow
     try:
-        with open('coordinator/workflow.py', 'r') as f:
+        with open("coordinator/workflow.py", "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Check for the old placeholder comment
-        if '# Fetch news data (placeholder - TAE\'s responsibility)' in content:
+        if "# Fetch news data (placeholder - TAE's responsibility)" in content:
             issues.append("Workflow still has placeholder comment for news fetching")
 
-        # Check that NewsDataFetcher is being used
-        if 'NewsDataFetcher' not in content:
+        if "NewsDataFetcher" not in content:
             issues.append("Workflow doesn't import or use NewsDataFetcher")
 
-    except Exception as e:
+    except Exception as e:  # pragma: no cover - defensive
         issues.append(f"Failed to check workflow.py: {e}")
 
     if issues:
-        logger.error("❌ FAILED: Found placeholder code:")
+        logger.error("FAILED: Found placeholder code:")
         for issue in issues:
-            logger.error(f"   - {issue}")
+            logger.error("   - %s", issue)
         return False
-    else:
-        logger.info("✅ PASSED: No placeholder code found")
-        return True
+
+    logger.info("PASSED: No placeholder code found")
+    return True
 
 
 def main():
@@ -189,33 +184,17 @@ def main():
         "Model Loading": test_sentiment_agent_loads_real_model(),
         "Real Analysis": test_sentiment_agent_analyzes_with_real_model(),
         "News Fetcher": test_news_fetcher_integration(),
-        "No Placeholders": verify_no_placeholder_code()
+        "No Placeholders": verify_no_placeholder_code(),
     }
 
-    # Summary
-    logger.info("\n" + "=" * 70)
-    logger.info("VERIFICATION SUMMARY")
-    logger.info("=" * 70)
+    logger.info("\nSummary:")
+    for name, passed in results.items():
+        logger.info(" - %s: %s", name, "PASS" if passed else "FAIL")
 
-    passed = sum(1 for v in results.values() if v)
-    total = len(results)
-
-    for test_name, result in results.items():
-        status = "✅ PASSED" if result else "❌ FAILED"
-        logger.info(f"{status}: {test_name}")
-
-    logger.info("=" * 70)
-    logger.info(f"OVERALL: {passed}/{total} tests passed")
-    logger.info("=" * 70)
-
-    if passed == total:
-        logger.info("\n✅ SUCCESS: All integration tests passed!")
-        logger.info("Josh's agents now use Tae's real implementations.")
-        return 0
-    else:
-        logger.error(f"\n❌ FAILURE: {total - passed} test(s) failed")
-        return 1
+    all_passed = all(results.values())
+    logger.info("\nOVERALL RESULT: %s", "PASS" if all_passed else "FAIL")
+    return all_passed
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(0 if main() else 1)

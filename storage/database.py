@@ -150,11 +150,16 @@ class Database:
 
         # Log sample of first article
         first_article = news_articles[0]
+        sample_score = first_article.get('sentiment_score')
+        try:
+            sample_score_val = float(sample_score) if sample_score is not None else 0.0
+        except Exception:
+            sample_score_val = 0.0
         logger.info(f"         → Sample article (first):")
         logger.info(f"            Title: {first_article.get('title', 'N/A')[:60]}...")
         logger.info(f"            Source: {first_article.get('source', 'N/A')}")
         logger.info(f"            Published: {first_article.get('published_at', 'N/A')}")
-        logger.info(f"            Sentiment: {first_article.get('sentiment_label', 'N/A')} ({first_article.get('sentiment_score', 0):.2f})")
+        logger.info(f"            Sentiment: {first_article.get('sentiment_label', 'N/A')} ({sample_score_val:.2f})")
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -162,6 +167,11 @@ class Database:
             errors = 0
             for article in news_articles:
                 try:
+                    score_val = article.get('sentiment_score')
+                    try:
+                        score_val = float(score_val) if score_val is not None else 0.0
+                    except Exception:
+                        score_val = 0.0
                     cursor.execute("""
                         INSERT OR REPLACE INTO news_cache
                         (ticker, title, url, published_at, source, summary,
@@ -175,7 +185,7 @@ class Database:
                         article.get('source', ''),
                         article.get('summary', ''),
                         article.get('sentiment_label'),
-                        article.get('sentiment_score'),
+                        score_val,
                         datetime.now().isoformat()
                     ))
                     inserted += 1

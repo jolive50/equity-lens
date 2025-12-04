@@ -117,6 +117,11 @@ def setup_logging(
     log_path = Path(log_dir)
     log_path.mkdir(exist_ok=True)
 
+    # Allow environment override for verbosity (e.g., FRESHSTART_LOG_LEVEL=DEBUG)
+    env_level = os.getenv("FRESHSTART_LOG_LEVEL")
+    if env_level:
+        log_level = getattr(logging, env_level.upper(), log_level)
+
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(log_level)

@@ -94,7 +94,10 @@ class DeBertaSentiment(BaseSentiment):
         from transformers import AutoConfig
 
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+            try:
+                self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=True)
+            except Exception:
+                self._tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=False)
             self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
             cfg = AutoConfig.from_pretrained(self.model_name)
             self._num_labels = int(getattr(cfg, "num_labels", 3) or 3)

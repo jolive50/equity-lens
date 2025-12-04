@@ -116,6 +116,16 @@ class RobertaSentiment(BaseSentiment):
             else {0: "negative", 1: "neutral", 2: "positive"}
         )
 
+    def get_model_info(self) -> Dict[str, Any]:
+        return {
+            "name": "RoBERTa",
+            "type": "transformer_tf",
+            "model_name": self.model_name,
+            "labels": self._label_ix2key or {},
+            "max_length": self.max_length,
+            "temperature": self.temperature,
+        }
+
     # ---------------- internal helpers ----------------
     def _forward_logits(self, texts: Sequence[str]) -> np.ndarray:
         assert self._tokenizer is not None and self._model is not None

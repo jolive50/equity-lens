@@ -134,6 +134,13 @@ class SentimentEnsemble:
         self.entropy_weighting = bool(entropy_weighting)
         self.five_band = bool(five_band)
         self.five_band_thresholds = five_band_thresholds
+        logger.info(
+            "SentimentEnsemble initialized: models=%s weights=%s av_mode=%s av_weight=%.2f",
+            list(self.models.keys()),
+            self.weights,
+            self.av_trust_mode,
+            self.av_weight,
+        )
 
     def load(self) -> None:
         for m in self.models.values():
@@ -144,6 +151,15 @@ class SentimentEnsemble:
         start_time = time.time()
         provider = (item.get("provider") or "").lower()
         text_id = item.get("id", "unknown")
+
+        logger.info(
+            "Ensemble predict_one: provider=%s text_id=%s models=%s",
+            provider,
+            text_id,
+            list(self.models.keys()),
+        )
+        if len(self.models) < 2:
+            logger.warning("Ensemble has <2 models; results may mirror the only available model(s)")
 
         logger.info(f"🎯 [Ensemble] Starting prediction for text_id={text_id}, provider={provider}")
         logger.debug(f"   Models: {list(self.models.keys())}, Weights: {self.weights}")
@@ -252,6 +268,7 @@ class SentimentEnsemble:
         body = (item.get("body") or "").strip()
         wc = int(item.get("word_count") or 0)
 
+        logger.info("      Models available for vote: %s", list(self.models.keys()))
         logger.debug(f"   🗳️  Starting ensemble vote with {len(self.models)} models")
         logger.debug(f"      Title length: {len(title)}, Body: {len(body)} chars, {wc} words")
 

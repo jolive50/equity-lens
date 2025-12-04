@@ -18,9 +18,9 @@ prediction_ensemble_strategy: weighted_average
 # Model weights for weighted_average strategy
 # Adjust based on individual model performance
 prediction_model_weights:
-  LSTM: 0.4              # Strong temporal pattern recognition
+  LSTM: 0.25              # Strong temporal pattern recognition
   GRU: 0.35              # Good at recent trends
-  XGBoost: 0.25          # Optimized gradient boosting (better than sklearn GradientBoost)
+  XGBoost: 0.4          # Optimized gradient boosting (better than sklearn GradientBoost)
 
 # ============================================================
 # SENTIMENT MODELS (Tae's Models)
@@ -28,8 +28,8 @@ prediction_model_weights:
 sentiment_models:
   - FinBERT
   - RoBERTa
-  - VADER
-  - TextBlob
+  - DeBERTa
+  - AlphaVantage
 
 # Enable sentiment ensemble mode
 use_sentiment_ensemble: true
@@ -39,10 +39,16 @@ sentiment_ensemble_strategy: weighted_average
 
 # Sentiment model weights (lowercase keys required by ensemble code)
 sentiment_model_weights:
-  finbert: 0.4    # Best for financial text
-  roberta: 0.3    # Strong general sentiment
-  vader: 0.2      # Good for social media/informal text (not yet implemented)
-  textblob: 0.1   # Simple baseline (not yet implemented)
+  finbert: 0.35    # Best for financial text
+  roberta: 0.35    # Strong general sentiment
+  deberta: 0.3    # Strong contextual understanding
+
+# Alpha Vantage news feed toggle (requires ALPHA_VANTAGE_API_KEY env var)
+enable_alpha_vantage_news: true
+alpha_vantage_max_items: 10
+# alpha_vantage_api_key: "YOUR_KEY"
+# Blend weight for Alpha Vantage vs model votes (0.0-1.0; lower = trust models more)
+sentiment_av_weight: 0.2
 
 # ============================================================
 # WORKFLOW SETTINGS

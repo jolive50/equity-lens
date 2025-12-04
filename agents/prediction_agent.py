@@ -29,27 +29,14 @@ class PredictionAgent:
 
         Args:
             model: Optional BasePredictionModel instance (LSTM, GRU, GB, or Ensemble)
-                   If None, will attempt to load default model
+                   Models should be constructed by the caller (decoupled from agent)
         """
         self.model = model
-
-        if self.model is None:
-            self._load_default_model()
 
         if self.model is not None:
             logger.info("PredictionAgent initialized with %s", self.model.__class__.__name__)
         else:
-            logger.warning("PredictionAgent initialized without a backing model")
-
-    def _load_default_model(self):
-        """Load default prediction model (LSTM)."""
-        try:
-            from models.prediction.lstm_model import LSTMModel
-            self.model = LSTMModel()
-            logger.info("Loaded default LSTM model")
-        except Exception as e:
-            logger.error(f"Failed to load default model: {e}")
-            self.model = None
+            logger.warning("PredictionAgent initialized without a backing model (model must be provided externally)")
 
     def run(
         self,

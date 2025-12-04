@@ -60,7 +60,7 @@ class TestPredictionAgent:
     def test_prediction_agent_initialization_without_model(self):
         """Test initializing PredictionAgent without a model."""
         agent = PredictionAgent()
-        assert agent.model is not None
+        assert agent.model is None
 
     def test_prediction_agent_run(self, mock_prediction_model, sample_market_data, sample_fundamentals):
         """Test running PredictionAgent."""

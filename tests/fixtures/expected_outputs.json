@@ -16,17 +16,17 @@
     "positive_news": {
       "label": "positive",
       "score_range": [0.5, 1.0],
-      "models": ["FinBERT", "RoBERTa", "VADER", "TextBlob"]
+      "models": ["FinBERT", "RoBERTa", "DeBERTa"]
     },
     "negative_news": {
       "label": "negative",
       "score_range": [-1.0, -0.3],
-      "models": ["FinBERT", "RoBERTa", "VADER", "TextBlob"]
+      "models": ["FinBERT", "RoBERTa", "DeBERTa"]
     },
     "neutral_news": {
       "label": "neutral",
       "score_range": [-0.3, 0.3],
-      "models": ["FinBERT", "RoBERTa", "VADER", "TextBlob"]
+      "models": ["FinBERT", "RoBERTa", "DeBERTa"]
     }
   },
   "workflow_outputs": {

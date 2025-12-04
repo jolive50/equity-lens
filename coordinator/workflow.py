@@ -5,7 +5,7 @@ Simplified LangGraph workflow connecting all agents.
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict, TYPE_CHECKING
 
 import pandas as pd
 from langgraph.graph import StateGraph
@@ -16,6 +16,9 @@ from agents.reflection_agent import ReflectionAgent
 from agents.sentiment_agent import SentimentAgent
 from storage.database import Database
 from storage.vector_store import NewsVectorStore
+
+if TYPE_CHECKING:
+    from coordinator.config import WorkflowConfig
 
 logger = logging.getLogger("freshstart.coordinator")
 
@@ -273,7 +276,8 @@ def create_freshstart_workflow(
     prediction_agent: PredictionAgent,
     sentiment_agent: SentimentAgent,
     reflection_agent: ReflectionAgent,
-    explanation_agent: ExplanationAgent
+    explanation_agent: ExplanationAgent,
+    config: Optional["WorkflowConfig"] = None,
 ) -> StateGraph:
     """Create the FreshStart analysis workflow.
 
@@ -282,10 +286,12 @@ def create_freshstart_workflow(
         sentiment_agent: Agent for sentiment analysis
         reflection_agent: Agent for quality validation
         explanation_agent: Agent for generating explanations
+        config: Workflow configuration (for data source toggles)
 
     Returns:
         Compiled LangGraph workflow
     """
+    cfg = config
     builder = StateGraph(StockAnalysisState)
 
     def validate_input(state: StockAnalysisState) -> StockAnalysisState:
@@ -376,10 +382,11 @@ def create_freshstart_workflow(
 
         state["fundamentals"] = fundamentals
 
-        # Fetch news data using Tae's NewsDataFetcher (reuse cache when fresh)
-        logger.info("   📰 Fetching news articles...")
+        # Fetch news data (YF) with optional Alpha Vantage feed and caching
+        logger.info("   ?? Fetching news articles...")
         news_start = time.time()
         news_limit = 50
+        use_alpha_vantage = bool(cfg and getattr(cfg, "enable_alpha_vantage_news", False))
         cached_recent_news = _load_cached_news(
             ticker,
             limit=news_limit,
@@ -388,7 +395,7 @@ def create_freshstart_workflow(
         if cached_recent_news:
             state["news_data"] = cached_recent_news
             logger.info(
-                "      ✓ Using cached news: %d articles (≤%d min old) [CACHE HIT]",
+                "      ? Using cached news: %d articles (?%d min old) [CACHE HIT]",
                 len(cached_recent_news),
                 NEWS_CACHE_TTL_MINUTES,
             )
@@ -397,24 +404,42 @@ def create_freshstart_workflow(
                 from data.fetchers.news_data import fetch_news_yf_only
 
                 news_articles = fetch_news_yf_only(ticker, max_items=news_limit)
-                state["news_data"] = news_articles
+                av_articles: List[Dict[str, Any]] = []
 
-                logger.info(f"      ✓ Fetched fresh news: {len(news_articles)} articles [API CALL]")
-                _cache_news_articles(ticker, news_articles)
-                _persist_news_embeddings(ticker, news_articles)
+                if use_alpha_vantage:
+                    try:
+                        from models.sentiment.alpha_vantage_sentiment import fetch_alpha_vantage_news
+
+                        av_key = cfg.resolve_alpha_vantage_key() if cfg else None
+                        if av_key:
+                            av_max = int(getattr(cfg, "alpha_vantage_max_items", 10) or 10)
+                            av_articles = fetch_alpha_vantage_news(ticker, api_key=av_key, max_items=av_max)
+                            logger.info(f"      ? Fetched Alpha Vantage news: {len(av_articles)} articles [API CALL]")
+                        else:
+                            logger.warning("      ??  Alpha Vantage news enabled but no API key found; skipping Alpha Vantage fetch")
+                    except Exception as av_exc:
+                        logger.warning(f"      ??  Alpha Vantage news fetch failed: {av_exc}")
+
+                combined_news = av_articles + news_articles
+                state["news_data"] = combined_news
+
+                logger.info(f"      ? Fetched fresh news: {len(combined_news)} articles [API CALL]")
+                _cache_news_articles(ticker, combined_news)
+                _persist_news_embeddings(ticker, combined_news)
 
             except Exception as e:
-                logger.error(f"      ✗ Failed to fetch news: {e}")
+                logger.error(f"      ? Failed to fetch news: {e}")
                 cached_news = _load_cached_news(ticker, limit=news_limit)
                 if cached_news:
                     warning = f"News API error ({str(e)}); using cached articles"
-                    logger.warning(f"      ⚠️  {warning}")
+                    logger.warning(f"      ??  {warning}")
                     state["warnings"].append(warning)
                     state["news_data"] = cached_news
                 else:
                     state["warnings"].append(f"News fetch error: {str(e)}")
                     state["news_data"] = []
-        logger.info(f"      ⏱️  News fetch: {time.time() - news_start:.2f}s")
+        logger.info(f"      ??  News fetch: {time.time() - news_start:.2f}s")
+
 
         logger.info(f"   ✅ Data fetch complete ({time.time() - node_start:.2f}s total)")
         logger.info(f"      Summary: {len(market_data)} price rows, {len(fundamentals)} metrics, {len(state.get('news_data', []))} articles")
@@ -494,6 +519,14 @@ def create_freshstart_workflow(
             logger.info(f"      Ticker: {state.get('ticker', 'N/A')}")
             logger.info(f"      News articles: {len(state['news_data'])}")
             logger.info(f"      Prediction direction: {state.get('prediction_result', {}).get('direction', 'N/A')}")
+            if sentiment_agent.sentiment_model:
+                try:
+                    info = sentiment_agent.sentiment_model.get_model_info()
+                    logger.info(f"      Sentiment model info: {info}")
+                    if hasattr(sentiment_agent.sentiment_model, 'models'):
+                        logger.info(f"      Ensemble members: {list(sentiment_agent.sentiment_model.models.keys())}")
+                except Exception as e:
+                    logger.warning(f"      Unable to read sentiment model info: {e}")
 
             result = sentiment_agent.run(
                 ticker=state["ticker"],
@@ -781,7 +814,8 @@ def run_stock_analysis(
         prediction_agent=prediction_agent,
         sentiment_agent=sentiment_agent,
         reflection_agent=reflection_agent,
-        explanation_agent=explanation_agent
+        explanation_agent=explanation_agent,
+        config=config
     ).compile()
     logger.info(f"   ✓ Workflow compiled ({time.time() - compile_start:.2f}s)")
 
