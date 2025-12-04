@@ -4,9 +4,10 @@ JOSH's Component - Prediction Agent
 Uses PAM's prediction models (LSTM, GRU, GB, or Ensemble) to forecast price direction.
 """
 import logging
-import pandas as pd
-from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from tools.prediction_tools import predict_with_model
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PredictionAgentResult:
     """Result from PredictionAgent."""
+
     direction: str  # "up", "down", "neutral"
     confidence: float  # 0.0-1.0
     narrative: str  # English explanation
@@ -24,7 +26,7 @@ class PredictionAgentResult:
 class PredictionAgent:
     """Agent that makes price predictions using PAM's models."""
 
-    def __init__(self, model=None):
+    def __init__(self, model: Optional[Any] = None):
         """Initialize PredictionAgent.
 
         Args:
@@ -42,99 +44,52 @@ class PredictionAgent:
         self,
         ticker: str,
         market_data: List[Dict[str, Any]],
-        fundamentals: Dict[str, float]
+        fundamentals: Dict[str, float],
     ) -> PredictionAgentResult:
-        """Make prediction for a stock.
-
-        Args:
-            ticker: Stock symbol
-            market_data: List of dicts with OHLCV data
-            fundamentals: Dict with financial metrics
-
-        Returns:
-            PredictionAgentResult with direction, confidence, narrative
-        """
+        """Make prediction for a stock."""
         import time
+
         agent_start = time.time()
 
         if self.model is None:
             raise RuntimeError("No prediction model loaded")
 
-        logger.info("      ╔══════════════════════════════════════════════════════╗")
-        logger.info("      ║  🔮 PredictionAgent Execution                      ║")
-        logger.info("      ╚══════════════════════════════════════════════════════╝")
-        logger.info(f"         Ticker: {ticker}")
-        logger.info(f"         Model: {self.model.__class__.__name__}")
-        logger.info(f"         Market data rows: {len(market_data)}")
-        logger.info(f"         Fundamentals: {len(fundamentals)} metrics")
+        logger.info("      PredictionAgent Execution")
+        logger.info("         Ticker: %s", ticker)
+        logger.info("         Model: %s", self.model.__class__.__name__)
+        logger.info("         Market data rows: %d", len(market_data))
+        logger.info("         Fundamentals: %d metrics", len(fundamentals))
 
-        # Convert market_data to DataFrame
-        df = pd.DataFrame(market_data)
-
-        # Ensure required columns exist
-        required_cols = ['close', 'volume']
-        if not all(col in df.columns for col in required_cols):
-            raise ValueError(f"Market data missing required columns: {required_cols}")
-
-        # Make prediction
         try:
-            logger.info(f"         → Calling model.predict()...")
-            predict_start = time.time()
-            result = self.model.predict(df)
-            predict_time = time.time() - predict_start
-            logger.info(f"         ✓ Model inference: {predict_time:.3f}s")
-
-            # Generate narrative
-            narrative = self._generate_narrative(ticker, result, fundamentals)
+            result, predict_time, narrative = predict_with_model(
+                self.model, ticker, market_data, fundamentals
+            )
 
             prediction = PredictionAgentResult(
                 direction=result.direction,
                 confidence=result.confidence,
                 narrative=narrative,
                 probabilities=result.probabilities,
-                metadata=result.metadata
+                metadata=result.metadata,
             )
 
             total_time = time.time() - agent_start
 
-            logger.info("      ┌──────────────────────────────────────────────────┐")
-            logger.info("      │  📊 Prediction Result                            │")
-            logger.info("      └──────────────────────────────────────────────────┘")
-            logger.info(f"         Direction: {prediction.direction.upper()}")
-            logger.info(f"         Confidence: {prediction.confidence:.1%}")
-            logger.info(f"         Probabilities:")
-            logger.info(f"            ↑ UP:      {result.probabilities['up']:.1%}")
-            logger.info(f"            ↓ DOWN:    {result.probabilities['down']:.1%}")
-            logger.info(f"            → NEUTRAL: {result.probabilities.get('neutral', 0):.1%}")
-            logger.info(f"         Metadata: {result.metadata}")
-            logger.info(f"         Total time: {total_time:.3f}s")
+            logger.info("      Prediction complete")
+            logger.info("         Direction: %s", prediction.direction.upper())
+            logger.info("         Confidence: %.1f%%", prediction.confidence * 100)
+            logger.info(
+                "         Probabilities: up=%.1f%% down=%.1f%% neutral=%.1f%%",
+                result.probabilities.get("up", 0) * 100,
+                result.probabilities.get("down", 0) * 100,
+                result.probabilities.get("neutral", 0) * 100,
+            )
+            logger.info("         Metadata: %s", result.metadata)
+            logger.info("         Timing: total=%.3fs model=%.3fs", total_time, predict_time)
 
             return prediction
 
-        except Exception as e:
-            logger.error(f"         ❌ Prediction failed for {ticker}: {e}")
-            raise RuntimeError(f"Prediction failed: {e}")
+        except Exception as exc:
+            logger.error("         Prediction failed for %s: %s", ticker, exc)
+            raise RuntimeError(f"Prediction failed: {exc}")
 
-    def _generate_narrative(
-        self,
-        ticker: str,
-        result,
-        fundamentals: Dict[str, float]
-    ) -> str:
-        """Generate English explanation of prediction."""
-        model_name = result.metadata.get("model", "Unknown")
-        prob_up = result.probabilities["up"]
-        prob_down = result.probabilities["down"]
-
-        narrative = (
-            f"{ticker} prediction: {result.direction.upper()} with "
-            f"{result.confidence:.1%} confidence using {model_name} model. "
-            f"Probabilities: up={prob_up:.1%}, down={prob_down:.1%}. "
-        )
-
-        # Add fundamental context if available
-        pe_ratio = fundamentals.get("pe_ratio", 0)
-        if pe_ratio > 0:
-            narrative += f"P/E ratio: {pe_ratio:.1f}. "
-
-        return narrative
