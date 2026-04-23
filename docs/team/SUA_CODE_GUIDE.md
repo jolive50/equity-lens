@@ -170,7 +170,7 @@ Health check endpoint.
 **Response:**
 ```json
 {
-  "service": "FreshStart API",
+  "service": "Equity Lens API",
   "status": "running",
   "version": "1.0.0"
 }
@@ -351,7 +351,7 @@ export default function RootLayout({ children }) {
 **Metadata:**
 ```tsx
 export const metadata: Metadata = {
-  title: 'FreshStart Stock Analysis',
+  title: 'Equity Lens Stock Analysis',
   description: 'AI-powered stock predictions with sentiment analysis',
 }
 ```
@@ -750,7 +750,7 @@ npm run dev
 curl http://localhost:8000/
 ```
 
-Expected: `{"service": "FreshStart API", "status": "running", ...}`
+Expected: `{"service": "Equity Lens API", "status": "running", ...}`
 
 **2. Analysis Request**
 ```bash
@@ -877,4 +877,4 @@ A: Yes! Could add: historical analysis, comparison charts, watchlists, alerts, e
 - System integration
 
 **Integration Success:**
-Your components connect the entire FreshStart system - from user input through ML analysis to final display. Well done!
+Your components connect the entire Equity Lens system - from user input through ML analysis to final display. Well done!

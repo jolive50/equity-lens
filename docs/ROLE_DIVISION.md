@@ -1,4 +1,4 @@
-# FreshStart MVP - Role Division & Responsibility Assignment
+# Equity Lens MVP - Role Division & Responsibility Assignment
 
 ## Team Members
 - **Tae**: Sentiment Models (FinBERT, RoBERTa, Alpha Vantage API Sentiment, TextBlob, VADER), SentimentEnsemble, ChromaDB, News Data Fetcher
@@ -21,7 +21,7 @@
 ├── kaggle.json                         # [PAM] - Kaggle API credentials
 │
 ├── logs/                               # [SHARED] - Application logging directory
-│   └── freshstart.log                  # [SHARED] - Main application log file
+│   └── equity-lens.log                  # [SHARED] - Main application log file
 │
 ├── utils/                              # [SHARED] - Shared utility modules
 │   ├── __init__.py                     # [SHARED]
@@ -134,7 +134,7 @@
 │
 └── db/                                 # [BYEOL] - Database storage directory
     ├── schema.sql                      # [BYEOL] - SQLite table definitions (~50 lines)
-    ├── freshstart.db                   # [BYEOL] - SQLite database file (generated at runtime)
+    ├── equity-lens.db                   # [BYEOL] - SQLite database file (generated at runtime)
     └── chroma/                         # [TAE] - ChromaDB vector store files (generated at runtime)
 ```
 
@@ -357,7 +357,7 @@
    - Create indexes for performance
    - Document schema structure
 
-2. **Database File** (`db/freshstart.db`)
+2. **Database File** (`db/equity-lens.db`)
    - SQLite database file generated at runtime
    - Located in `db/` directory alongside schema
    - Persistent storage for all application data
@@ -515,7 +515,7 @@ Return to FastAPI → Next.js Frontend
 1. **Logging Configuration** (`utils/logging_config.py`)
    - Centralized logging setup for entire application
    - Configures log levels, formats, and output destinations
-   - Writes to `logs/freshstart.log`
+   - Writes to `logs/equity-lens.log`
    - Console and file logging handlers
    - Used by ALL components
 
@@ -531,7 +531,7 @@ Return to FastAPI → Next.js Frontend
    - Command-line interface for running analyses
    - Development and testing utilities
 
-4. **Application Logs** (`logs/freshstart.log`)
+4. **Application Logs** (`logs/equity-lens.log`)
    - Runtime log file for debugging and monitoring
    - Captures all application events, errors, and warnings
    - Rotated automatically when too large
@@ -541,7 +541,7 @@ Return to FastAPI → Next.js Frontend
 - **Logging**: ALL team members use `utils/logging_config.py` in their components
 - **Cache Metrics**: Pam (price fetcher), Tae (news fetcher), Byeol (database)
 - **Launch Script**: ALL team members use `launch.py` to run the system
-- **Logs Directory**: ALL components write to `logs/freshstart.log`
+- **Logs Directory**: ALL components write to `logs/equity-lens.log`
 
 ---
 
@@ -586,7 +586,7 @@ Return to FastAPI → Next.js Frontend
 6. **Shared Utilities → ALL Team Members**
    - Import `utils.logging_config` for consistent logging across all components
    - Use `utils.cache_metrics` for cache performance tracking (Pam, Tae, Byeol)
-   - All components write logs to `logs/freshstart.log` via logging config
+   - All components write logs to `logs/equity-lens.log` via logging config
 
 ### Model Configuration Examples:
 
@@ -782,9 +782,9 @@ If you have questions about responsibilities or need clarification on interfaces
 - **Tae**: FinBERT, RoBERTa, Alpha Vantage API, TextBlob, VADER (5 sentiment models) + SentimentEnsemble + ChromaDB (vector store in `db/chroma/`)
 - **Pam**: LSTM, GRU, Gradient Boosting (XGBoost/LightGBM) trained on Kaggle SP500 dataset + PredictionEnsemble
 - **Sua**: Next.js (frontend) + FastAPI (backend)
-- **Byeol**: SQLite (database in `db/freshstart.db`) + pytest (comprehensive testing including ensemble scenarios)
+- **Byeol**: SQLite (database in `db/equity-lens.db`) + pytest (comprehensive testing including ensemble scenarios)
 - **Josh**: LangChain + LangGraph (agent orchestration) + Model Configuration System + PyYAML (config loading from `config.yaml`)
-- **Shared**: Centralized logging (`utils/logging_config.py` → `logs/freshstart.log`), cache metrics utilities, application launcher
+- **Shared**: Centralized logging (`utils/logging_config.py` → `logs/equity-lens.log`), cache metrics utilities, application launcher
 - **Documentation**: SHARED responsibility across all team members
 
 ---

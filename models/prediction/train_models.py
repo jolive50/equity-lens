@@ -723,7 +723,7 @@ def save_training_report(metrics: Dict[str, Dict[str, Any]], output_file: str = 
 
     report = [
         "=" * 80,
-        "FreshStart - Model Training Report (Research-Enhanced)",
+        "Equity Lens - Model Training Report (Research-Enhanced)",
         "=" * 80,
         ""
     ]
@@ -861,7 +861,7 @@ def main():
     from tensorflow.keras import backend as K
 
     logger.info("=" * 60)
-    logger.info("FreshStart - Model Training Pipeline")
+    logger.info("Equity Lens - Model Training Pipeline")
     logger.info("=" * 60)
 
     try:

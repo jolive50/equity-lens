@@ -6,11 +6,11 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
 
-logger = logging.getLogger("freshstart.storage")
+logger = logging.getLogger("equity_lens.storage")
 
 
 class Database:
-    def __init__(self, db_path: str = "db/freshstart.db"):
+    def __init__(self, db_path: str = "db/equity-lens.db"):
         self.db_path = db_path
         self._connection_pool = []
         self._init_database()

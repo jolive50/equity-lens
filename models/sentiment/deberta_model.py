@@ -1,4 +1,4 @@
-# FreshStart/models/sentiment/deberta_model.py
+# equity_lens/models/sentiment/deberta_model.py
 from __future__ import annotations
 
 import json
@@ -182,8 +182,8 @@ def _cli() -> None:
     Run DeBERTa sentiment on freshly fetched Yahoo Finance news (no saved JSON).
 
     Examples:
-      python -m FreshStart.models.sentiment.deberta_model AAPL
-      python -m FreshStart.models.sentiment.deberta_model AAPL --max-items 15 --zs
+      python -m equity_lens.models.sentiment.deberta_model AAPL
+      python -m equity_lens.models.sentiment.deberta_model AAPL --max-items 15 --zs
     """
     import argparse
     from textwrap import shorten

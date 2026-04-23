@@ -1,4 +1,4 @@
-# AGENT.md - AI Agent Guidelines for FreshStart MVP
+# AGENT.md - AI Agent Guidelines for Equity Lens MVP
 
 ## AI Agent Role: Senior Software Engineer & Project Director
 
@@ -26,7 +26,7 @@
 
 ## Project Overview
 
-**FreshStart MVP** is a simplified, production-ready stock analysis platform with ML-powered predictions and sentiment analysis. This is a **capstone project** for 5 students.
+**Equity Lens MVP** is a simplified, production-ready stock analysis platform with ML-powered predictions and sentiment analysis. This is a **capstone project** for 5 students.
 
 **Project Context:**
 - **Project Type:** College capstone MVP
@@ -393,7 +393,7 @@ Before considering code complete:
 
 ## Summary - Quick Reference
 
-**As an AI agent working on FreshStart MVP:**
+**As an AI agent working on Equity Lens MVP:**
 
 4. **Reject bad tech** - No PyTorch, no cloud, no unauthorized APIs
 5. **No placeholders** - Only real, working code

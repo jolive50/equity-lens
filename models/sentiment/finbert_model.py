@@ -1,4 +1,4 @@
-# FreshStart/models/sentiment/finbert_model.py
+# equity_lens/models/sentiment/finbert_model.py
 from __future__ import annotations
 
 import json
@@ -16,7 +16,7 @@ from data.fetchers.news_data import fetch_news_yf_only
 
 from .base_sentiment import BaseSentiment, normalize_probs
 
-logger = logging.getLogger("freshstart.sentiment.finbert")
+logger = logging.getLogger("equity_lens.sentiment.finbert")
 DEFAULT_FINBERT = os.environ.get("FINBERT_MODEL", "ProsusAI/finbert")
 
 
@@ -188,7 +188,7 @@ def _cli() -> None:
     Run FinBERT (TF) on freshly fetched Yahoo Finance news.
 
     Example:
-      python -m FreshStart.models.sentiment.finbert_model AAPL --max-items 15
+      python -m equity_lens.models.sentiment.finbert_model AAPL --max-items 15
     """
     import argparse
     from textwrap import shorten

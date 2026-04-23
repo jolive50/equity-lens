@@ -630,7 +630,7 @@ def main():
     max_stocks = None if args.max_stocks == 0 else args.max_stocks
 
     logger.info("=" * 60)
-    logger.info("FreshStart - Data Preprocessing")
+    logger.info("Equity Lens - Data Preprocessing")
     logger.info("=" * 60)
 
     preprocessor = DataPreprocessor()

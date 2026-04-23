@@ -1,11 +1,11 @@
-# FreshStart Test Suite
+# Equity Lens Test Suite
 
 **Owner:** Byeol
 **Last Updated:** 2025-11-10
 
 ## Overview
 
-This directory contains the complete test suite for the FreshStart MVP, including unit tests, integration tests, and end-to-end tests. The test suite ensures quality assurance across all components developed by team members.
+This directory contains the complete test suite for the Equity Lens MVP, including unit tests, integration tests, and end-to-end tests. The test suite ensures quality assurance across all components developed by team members.
 
 ## Test Structure
 
@@ -34,7 +34,7 @@ tests/
 
 ### Run All Tests
 ```bash
-cd /home/user/capstone/FreshStart
+cd /home/user/capstone/equity-lens
 pytest tests/ -v
 ```
 

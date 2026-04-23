@@ -1,5 +1,5 @@
 # PAM's Code Guide
-## Prediction Models & Price Data - FreshStart MVP
+## Prediction Models & Price Data - Equity Lens MVP
 
 **Team Member**: PAM
 **Responsibility**: Prediction Models, Price Data, Training Pipeline
@@ -43,7 +43,7 @@
 
 ## Overview - What You Built
 
-You've implemented all prediction model components for the FreshStart MVP:
+You've implemented all prediction model components for the Equity Lens MVP:
 
 | Component | File | Lines | What It Does |
 |-----------|------|-------|--------------|

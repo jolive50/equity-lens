@@ -6,7 +6,7 @@ import logging
 import os
 import time
 
-logger = logging.getLogger("freshstart.storage.chromadb")
+logger = logging.getLogger("equity_lens.storage.chromadb")
 
 
 class NewsVectorStore:

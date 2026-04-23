@@ -1,4 +1,4 @@
-"""FastAPI backend for FreshStart stock analysis.
+"""FastAPI backend for Equity Lens stock analysis.
 
 SUA's Component - Backend API
 Integrates with LangGraph workflow to provide stock analysis endpoint.
@@ -43,11 +43,11 @@ from api.models import (
 
 # Configure centralized logging with file rotation
 from utils.logging_config import setup_logging
-setup_logging(name="freshstart", log_dir="logs", log_level=logging.INFO)
-logger = logging.getLogger("freshstart.api")
+setup_logging(name="equity_lens", log_dir="logs", log_level=logging.INFO)
+logger = logging.getLogger("equity_lens.api")
 
 app = FastAPI(
-    title="FreshStart Stock Analysis API",
+    title="Equity Lens Stock Analysis API",
     description="AI-powered stock predictions with sentiment analysis",
     version="1.0.0"
 )
@@ -66,7 +66,7 @@ app.add_middleware(
 async def root() -> Dict[str, str]:
     """Health check endpoint."""
     return {
-        "service": "FreshStart API",
+        "service": "Equity Lens API",
         "status": "running",
         "version": "1.0.0"
     }
@@ -82,7 +82,7 @@ async def root() -> Dict[str, str]:
     }
 )
 async def analyze_stock(request: AnalysisRequest) -> AnalysisResponse:
-    """Analyze a stock using the FreshStart workflow.
+    """Analyze a stock using the Equity Lens workflow.
 
     Args:
         request: Analysis request with ticker and user_tier
@@ -268,7 +268,7 @@ async def general_exception_handler(request, exc: Exception) -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting FreshStart API server...")
+    logger.info("Starting Equity Lens API server...")
     uvicorn.run(
         "api.main:app",
         host="0.0.0.0",

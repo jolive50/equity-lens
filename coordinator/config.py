@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowConfig:
-    """Configuration for FreshStart workflow."""
+    """Configuration for Equity Lens workflow."""
 
     def __init__(self, config_dict: Optional[Dict[str, Any]] = None):
         """Initialize workflow configuration.
@@ -284,7 +284,7 @@ class WorkflowConfig:
 
 # Example config.yaml structure
 DEFAULT_CONFIG_YAML = """
-# FreshStart Workflow Configuration
+# Equity Lens Workflow Configuration
 # Enable all models in ensemble mode for maximum accuracy
 
 # ============================================================

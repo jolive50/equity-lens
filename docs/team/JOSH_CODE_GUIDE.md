@@ -54,7 +54,7 @@
 
 You created the **orchestration layer** that connects all team members' work into a unified stock analysis system. Think of it as the conductor of an orchestra - you don't play the instruments (the ML models), but you coordinate when and how each instrument plays.
 
-**Your Impact:** Your workflow is the backbone of FreshStart - every single analysis request flows through your 6-node pipeline, integrating Pam's predictions, Tae's sentiment analysis, Byeol's database, and Sua's API into a seamless user experience.
+**Your Impact:** Your workflow is the backbone of Equity Lens - every single analysis request flows through your 6-node pipeline, integrating Pam's predictions, Tae's sentiment analysis, Byeol's database, and Sua's API into a seamless user experience.
 
 ### Your Files
 
@@ -538,9 +538,9 @@ def build_explanation(state: StockAnalysisState) -> StockAnalysisState:
 **Step 1: Create the workflow**
 
 ```python
-from coordinator.workflow import create_freshstart_workflow
+from coordinator.workflow import create_equity_lens_workflow
 
-workflow = create_freshstart_workflow(
+workflow = create_equity_lens_workflow(
     prediction_agent=prediction_agent,
     sentiment_agent=sentiment_agent,
     reflection_agent=reflection_agent,
@@ -668,7 +668,7 @@ config = WorkflowConfig.from_yaml("config.yaml")
 
 **ACTUAL Production `config.yaml` (Located at project root):**
 ```yaml
-# FreshStart Workflow Configuration
+# Equity Lens Workflow Configuration
 # ✅ CURRENT PRODUCTION SETTINGS
 
 # Prediction models to use
@@ -824,7 +824,7 @@ explanation_agent = ExplanationAgent()
 **Step 4: Build Workflow**
 ```python
 # Create LangGraph workflow
-workflow = create_freshstart_workflow(
+workflow = create_equity_lens_workflow(
     prediction_agent, sentiment_agent, reflection_agent, explanation_agent
 ).compile()
 ```
@@ -1021,7 +1021,7 @@ def test_reflection_alignment():
 ```python
 def test_full_workflow():
     # Create workflow with mock agents
-    workflow = create_freshstart_workflow(
+    workflow = create_equity_lens_workflow(
         prediction_agent=MockPredictionAgent(),
         sentiment_agent=MockSentimentAgent(),
         reflection_agent=ReflectionAgent(),
@@ -1040,7 +1040,7 @@ def test_full_workflow():
 
 **Test the workflow directly:**
 ```bash
-cd /home/user/capstone/FreshStart
+cd /home/user/capstone/equity-lens
 python coordinator/workflow.py
 ```
 

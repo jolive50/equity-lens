@@ -37,7 +37,7 @@
 
 ## Overview
 
-As the Database & Testing specialist for FreshStart MVP, you are responsible for:
+As the Database & Testing specialist for Equity Lens MVP, you are responsible for:
 
 1. **Database Infrastructure** - SQLite database for caching and analysis storage
 2. **Complete Test Suite** - Unit, integration, and E2E tests for all components
@@ -45,7 +45,7 @@ As the Database & Testing specialist for FreshStart MVP, you are responsible for
 
 Your work enables the entire team to build with confidence, knowing that their code is tested and data is properly persisted.
 
-**Your Impact:** Your caching strategy saves 90% of API calls, and your tests catch bugs before they reach production. You're the quality backbone of FreshStart.
+**Your Impact:** Your caching strategy saves 90% of API calls, and your tests catch bugs before they reach production. You're the quality backbone of Equity Lens.
 
 ---
 
@@ -53,7 +53,7 @@ Your work enables the entire team to build with confidence, knowing that their c
 
 ### What It Does
 
-The database schema defines three main tables that support the FreshStart application:
+The database schema defines three main tables that support the Equity Lens application:
 
 1. **price_cache** - Stores all fetched stock price data
 2. **news_cache** - Stores all fetched news articles
@@ -360,7 +360,7 @@ else:
 
 ### What It Does
 
-The test suite provides comprehensive testing for all FreshStart components:
+The test suite provides comprehensive testing for all Equity Lens components:
 
 1. **Unit Tests** - Test individual functions and classes in isolation
 2. **Integration Tests** - Test how components work together

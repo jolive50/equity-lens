@@ -1,4 +1,4 @@
-"""LangGraph workflow for FreshStart stock analysis.
+"""LangGraph workflow for Equity Lens stock analysis.
 
 JOSH's Component - Workflow Orchestration
 Simplified LangGraph workflow connecting all agents.
@@ -20,7 +20,7 @@ from storage.vector_store import NewsVectorStore
 if TYPE_CHECKING:
     from coordinator.config import WorkflowConfig
 
-logger = logging.getLogger("freshstart.coordinator")
+logger = logging.getLogger("equity_lens.coordinator")
 
 _db_client: Optional[Database] = None
 _db_init_failed = False
@@ -272,14 +272,14 @@ class StockAnalysisState(TypedDict, total=False):
     warnings: List[str]
 
 
-def create_freshstart_workflow(
+def create_equity_lens_workflow(
     prediction_agent: PredictionAgent,
     sentiment_agent: SentimentAgent,
     reflection_agent: ReflectionAgent,
     explanation_agent: ExplanationAgent,
     config: Optional["WorkflowConfig"] = None,
 ) -> StateGraph:
-    """Create the FreshStart analysis workflow.
+    """Create the Equity Lens analysis workflow.
 
     Args:
         prediction_agent: Agent for price predictions
@@ -810,7 +810,7 @@ def run_stock_analysis(
     # Create and compile workflow
     logger.info(f"\n🔧 WORKFLOW: Building LangGraph workflow...")
     compile_start = time.time()
-    workflow = create_freshstart_workflow(
+    workflow = create_equity_lens_workflow(
         prediction_agent=prediction_agent,
         sentiment_agent=sentiment_agent,
         reflection_agent=reflection_agent,
@@ -880,7 +880,7 @@ if __name__ == "__main__":
     try:
         result = run_stock_analysis("AAPL", user_tier="basic")
         print("\n" + "=" * 60)
-        print("FreshStart Analysis Result")
+        print("Equity Lens Analysis Result")
         print("=" * 60)
         print(f"Ticker: {result['ticker']}")
         print(f"Prediction: {result['prediction']['direction']} ({result['prediction']['confidence']:.1%})")

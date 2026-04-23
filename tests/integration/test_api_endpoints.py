@@ -15,7 +15,7 @@ class TestFastAPIEndpoints:
         from api.main import app
 
         assert app is not None
-        assert app.title == "FreshStart Stock Analysis API"
+        assert app.title == "Equity Lens Stock Analysis API"
         assert app.version == "1.0.0"
 
     def test_analyze_endpoint_exists(self):
