@@ -6,7 +6,7 @@ import logging
 from typing import Dict
 from datetime import datetime
 
-logger = logging.getLogger("freshstart.metrics")
+logger = logging.getLogger("equity_lens.metrics")
 
 
 class CacheMetrics:

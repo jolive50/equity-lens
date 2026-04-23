@@ -1,4 +1,4 @@
--- FreshStart MVP Database Schema
+-- Equity Lens MVP Database Schema
 -- Byeol's database design for caching and analysis storage
 
 -- Price cache table - stores all fetched price data to avoid redundant API calls

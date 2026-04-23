@@ -1,4 +1,4 @@
-# FreshStart/models/sentiment/ensemble.py
+# equity_lens/models/sentiment/ensemble.py
 from __future__ import annotations
 
 import logging
@@ -22,7 +22,7 @@ from .base_sentiment import (
 from data.fetchers.news_data import fetch_news_yf_only
 from .alpha_vantage_sentiment import fetch_alpha_vantage_news
 
-logger = logging.getLogger("freshstart.sentiment.ensemble")
+logger = logging.getLogger("equity_lens.sentiment.ensemble")
 
 
 def _soft_vote(model_probs: Dict[str, Dict[str, float]], weights: Dict[str, float]) -> Dict[str, float]:

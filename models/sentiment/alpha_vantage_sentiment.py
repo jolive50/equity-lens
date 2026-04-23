@@ -1,4 +1,4 @@
-# FreshStart/models/sentiment/alpha_vantage_sentiment.py
+# equity_lens/models/sentiment/alpha_vantage_sentiment.py
 from __future__ import annotations
 
 import json
@@ -114,7 +114,7 @@ def fetch_alpha_vantage_news(ticker: str, *, api_key: str, max_items: int = AV_M
         "limit": limit,
     }
     headers = {
-        "User-Agent": "FreshStart/1.0 (+capstone) Python-requests",
+        "User-Agent": "equity-lens/1.0 (+capstone) Python-requests",
         "Accept": "application/json",
     }
 

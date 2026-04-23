@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from coordinator.workflow import create_freshstart_workflow, StockAnalysisState
+from coordinator.workflow import create_equity_lens_workflow, StockAnalysisState
 from agents.prediction_agent import PredictionAgentResult
 from agents.sentiment_agent import SentimentAgentResult
 
@@ -75,7 +75,7 @@ def build_mock_agents(
 
 def compile_workflow_from_agents(agents):
     """Compile workflow with provided mock agents."""
-    return create_freshstart_workflow(
+    return create_equity_lens_workflow(
         agents["prediction"],
         agents["sentiment"],
         agents["reflection"],
@@ -144,8 +144,8 @@ class TestWorkflowCreation:
     """Test LangGraph workflow creation (Josh's component)."""
 
     def test_create_workflow(self, mock_agents):
-        """Test creating FreshStart workflow."""
-        workflow = create_freshstart_workflow(
+        """Test creating Equity Lens workflow."""
+        workflow = create_equity_lens_workflow(
             mock_agents['prediction'],
             mock_agents['sentiment'],
             mock_agents['reflection'],
@@ -155,7 +155,7 @@ class TestWorkflowCreation:
 
     def test_workflow_has_required_nodes(self, mock_agents):
         """Test that workflow has all required processing nodes."""
-        workflow = create_freshstart_workflow(
+        workflow = create_equity_lens_workflow(
             mock_agents['prediction'],
             mock_agents['sentiment'],
             mock_agents['reflection'],
@@ -227,7 +227,7 @@ class TestWorkflowExecution:
 
             mock_agents['explanation'].run.return_value = "Analysis complete"
 
-            workflow = create_freshstart_workflow(
+            workflow = create_equity_lens_workflow(
                 mock_agents['prediction'],
                 mock_agents['sentiment'],
                 mock_agents['reflection'],
@@ -272,7 +272,7 @@ class TestWorkflowExecution:
 
         explanation_agent.run.return_value = "Test explanation"
 
-        workflow = create_freshstart_workflow(
+        workflow = create_equity_lens_workflow(
             prediction_agent,
             sentiment_agent,
             reflection_agent,
@@ -317,7 +317,7 @@ class TestWorkflowExecution:
 
     def test_workflow_handles_invalid_ticker(self, mock_agents):
         """Test workflow handles invalid ticker input."""
-        workflow = create_freshstart_workflow(
+        workflow = create_equity_lens_workflow(
             mock_agents['prediction'],
             mock_agents['sentiment'],
             mock_agents['reflection'],

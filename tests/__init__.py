@@ -1,1 +1,1 @@
-# FreshStart Test Suite
+# Equity Lens Test Suite

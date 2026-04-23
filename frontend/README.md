@@ -1,6 +1,6 @@
-# FreshStart Frontend
+# Equity Lens Frontend
 
-Next.js frontend for the FreshStart Stock Analysis MVP.
+Next.js frontend for the Equity Lens Stock Analysis MVP.
 
 ## Tech Stack
 

@@ -1,4 +1,4 @@
-"""Centralized logging configuration for FreshStart.
+"""Centralized logging configuration for Equity Lens.
 
 Provides file-based logging with rotation, structured formatting, and LangSmith tracing.
 """
@@ -91,7 +91,7 @@ class ContextualFormatter(logging.Formatter):
 
 
 def setup_logging(
-    name: str = "freshstart",
+    name: str = "equity_lens",
     log_dir: str = "logs",
     log_level: int = logging.INFO,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
@@ -117,8 +117,8 @@ def setup_logging(
     log_path = Path(log_dir)
     log_path.mkdir(exist_ok=True)
 
-    # Allow environment override for verbosity (e.g., FRESHSTART_LOG_LEVEL=DEBUG)
-    env_level = os.getenv("FRESHSTART_LOG_LEVEL")
+    # Allow environment override for verbosity (e.g., EQUITY_LENS_LOG_LEVEL=DEBUG)
+    env_level = os.getenv("EQUITY_LENS_LOG_LEVEL")
     if env_level:
         log_level = getattr(logging, env_level.upper(), log_level)
 
@@ -189,7 +189,7 @@ def _configure_langchain_tracing(logger: logging.Logger) -> None:
 
     if langchain_tracing and langchain_api_key:
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "freshstart-capstone")
+        os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "equity-lens")
 
         logger.info("✅ LangSmith tracing enabled")
         logger.info(f"   Project: {os.getenv('LANGCHAIN_PROJECT')}")
@@ -209,13 +209,13 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Configured logger instance
     """
-    # Check if root freshstart logger is configured
-    root_logger = logging.getLogger("freshstart")
+    # Check if root equity_lens logger is configured
+    root_logger = logging.getLogger("equity_lens")
     if not root_logger.handlers:
         setup_logging()
 
     # Return child logger
-    return logging.getLogger(f"freshstart.{name}")
+    return logging.getLogger(f"equity_lens.{name}")
 
 
 def set_request_context(request_id: str, stage: Optional[str] = None, component: Optional[str] = None) -> None:

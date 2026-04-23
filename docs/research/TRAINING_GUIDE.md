@@ -1,6 +1,6 @@
 # Model Training Guide
 
-This guide explains how to train the FreshStart prediction models using best practices.
+This guide explains how to train the Equity Lens prediction models using best practices.
 
 ## Overview
 

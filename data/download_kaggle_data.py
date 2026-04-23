@@ -127,7 +127,7 @@ def verify_data(data_dir: str = "data/raw") -> bool:
 def main():
     """Main entry point."""
     logger.info("=" * 60)
-    logger.info("FreshStart - Kaggle SP500 Data Download")
+    logger.info("Equity Lens - Kaggle SP500 Data Download")
     logger.info("Dataset: andrewmvd/sp-500-stocks")
     logger.info("=" * 60)
 

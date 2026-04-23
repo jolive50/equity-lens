@@ -142,7 +142,7 @@ def save_combined_report(results: Dict[str, Dict[str, Any]], output_file: str = 
 
     report = [
         "=" * 80,
-        "FreshStart - Combined Model Training Report",
+        "Equity Lens - Combined Model Training Report",
         "=" * 80,
         ""
     ]
@@ -306,7 +306,7 @@ def main():
     args = parser.parse_args()
 
     logger.info("=" * 80)
-    logger.info("FreshStart - Master Model Training Pipeline")
+    logger.info("Equity Lens - Master Model Training Pipeline")
     logger.info("=" * 80)
     logger.info(f"\nModels to train: {', '.join(args.models)}")
     logger.info(f"XGBoost grid search: {'disabled' if args.no_gridsearch else 'enabled'}")

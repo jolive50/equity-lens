@@ -1,4 +1,4 @@
-# FreshStart/models/sentiment/roberta_model.py
+# equity_lens/models/sentiment/roberta_model.py
 from __future__ import annotations
 
 import json
@@ -201,7 +201,7 @@ def _cli() -> None:
     Run RoBERTa (TF) on freshly fetched Yahoo Finance news.
 
     Example:
-      python -m FreshStart.models.sentiment.roberta_model AAPL --max-items 15
+      python -m equity_lens.models.sentiment.roberta_model AAPL --max-items 15
     """
     import argparse
     from textwrap import shorten

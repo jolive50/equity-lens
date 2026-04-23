@@ -1,4 +1,4 @@
-"""Pydantic models for FreshStart API.
+"""Pydantic models for Equity Lens API.
 
 SUA's Component - API Request/Response Models
 Type-safe schemas for FastAPI endpoints.

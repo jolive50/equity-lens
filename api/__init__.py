@@ -1,4 +1,4 @@
-"""FreshStart API module.
+"""Equity Lens API module.
 
 SUA's Component - Backend API
 FastAPI application for stock analysis.

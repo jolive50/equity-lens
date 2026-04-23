@@ -1,4 +1,4 @@
-// FreshStart/frontend/src/app/api/analyze/route.ts
+// equity-lens/frontend/src/app/api/analyze/route.ts
 // Next.js API route that either calls FastAPI or returns mock data
 // FastAPI가 켜져 있으면 그쪽으로 프록시, 아니면 더미 데이터 리턴
 

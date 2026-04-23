@@ -37,7 +37,7 @@ export default function Home() {
   return (
     <main className="container">
       <header>
-        <h1>FreshStart Stock Analysis</h1>
+        <h1>Equity Lens Stock Analysis</h1>
         <p>AI-powered stock predictions with sentiment analysis</p>
       </header>
 

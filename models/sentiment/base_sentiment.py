@@ -1,4 +1,4 @@
-# FreshStart/models/sentiment/base_sentiment.py
+# equity_lens/models/sentiment/base_sentiment.py
 from __future__ import annotations
 
 import abc
@@ -12,7 +12,7 @@ from enum import IntEnum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 # Get logger for sentiment models
-logger = logging.getLogger("freshstart.sentiment")
+logger = logging.getLogger("equity_lens.sentiment")
 
 # =========================
 # Types & core structures
@@ -346,7 +346,7 @@ class BaseSentiment(abc.ABC):
             out.append(r)
         return out
 
-    # Convenience: exact schema from FreshStart.data.fetchers.news_data
+    # Convenience: exact schema from Equity Lens.data.fetchers.news_data
     def predict_batch_from_fetcher(self, news_items: Iterable[Mapping[str, Any]]) -> List[SentimentResult]:
         """
         Accepts items as returned by fetch_news_yf_only(...):
@@ -424,10 +424,10 @@ def _cli() -> None:
     Examples (Windows-friendly):
 
       # file I/O (recommended)
-      python -m FreshStart.models.sentiment.base_sentiment --provider dummy --input news.json --output preds.json
+      python -m equity_lens.models.sentiment.base_sentiment --provider dummy --input news.json --output preds.json
 
       # still supports stdin (PowerShell)
-      Get-Content -Raw news.json | python -m FreshStart.models.sentiment.base_sentiment --provider dummy --stdin-json
+      Get-Content -Raw news.json | python -m equity_lens.models.sentiment.base_sentiment --provider dummy --stdin-json
     """
     import argparse, sys
     ap = argparse.ArgumentParser()

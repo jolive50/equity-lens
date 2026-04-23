@@ -79,7 +79,7 @@ FinBERTModel
 FLEXIBLE
 FLOW
 FormEvent
-FreshStart
+Equity Lens
 FULL
 FULLY
 FUNCTIONAL

@@ -1,2 +1,2 @@
-"""Shared tool utilities for FreshStart agents."""
+"""Shared tool utilities for Equity Lens agents."""
 
